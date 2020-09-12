@@ -173,9 +173,9 @@ static double clamp(double value) {
 
 static void xyz_to_srgb(double x, double y, double z, double *r, double *g, double *b) {
 	// http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
-	*r = srgb_gamma(3.2404542 * x - 1.5371385 * y - 0.4985314 * z, 2.2);
-	*g = srgb_gamma(-0.9692660 * x + 1.8760108 * y + 0.0415560 * z, 2.2);
-	*b = srgb_gamma(0.0556434 * x - 0.2040259 * y + 1.0572252 * z, 2.2);
+	*r = srgb_gamma(clamp(3.2404542 * x - 1.5371385 * y - 0.4985314 * z), 2.2);
+	*g = srgb_gamma(clamp(-0.9692660 * x + 1.8760108 * y + 0.0415560 * z), 2.2);
+	*b = srgb_gamma(clamp(0.0556434 * x - 0.2040259 * y + 1.0572252 * z), 2.2);
 }
 
 static void calc_whitepoint(int temp, double *rw, double *gw, double *bw) {
@@ -195,9 +195,9 @@ static void calc_whitepoint(int temp, double *rw, double *gw, double *bw) {
 	xyz_to_srgb(x, y, z, rw, gw, bw);
 
 	double maxw = fmaxl(*rw, fmaxl(*gw, *bw));
-	*rw = clamp(*rw / maxw);
-	*gw = clamp(*gw / maxw);
-	*bw = clamp(*bw / maxw);
+	*rw /= maxw;
+	*gw /= maxw;
+	*bw /= maxw;
 }
 
 static const char usage[] = "usage: %s [options]\n"
