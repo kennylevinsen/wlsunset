@@ -17,23 +17,34 @@
 
 enum state {
 	HIGH_TEMP,
+	ANIMATING_TO_LOW,
 	LOW_TEMP,
 	ANIMATING_TO_HIGH,
-	ANIMATING_TO_LOW,
+};
+
+static char *state_names[] = {
+	"high temperature",
+	"animating to low temperature",
+	"low temperature",
+	"animating to high temperature",
+	NULL
 };
 
 struct context {
 	double gamma;
-	time_t start_time;
-	time_t stop_time;
+
 	int high_temp;
 	int low_temp;
 	int duration;
+	double longitude;
+	double latitude;
 
+	time_t start_time;
+	time_t stop_time;
 	int cur_temp;
-	bool new_output;
 	enum state state;
 	time_t animation_start;
+	bool new_output;
 
 	struct wl_list outputs;
 };
@@ -195,35 +206,42 @@ static void set_temperature(struct context *ctx) {
 	}
 }
 
+static void recalc_stops(struct context *ctx, time_t now) {
+	time_t day = now - (now % 86400);
+	if (day < ctx->stop_time) {
+		return;
+	}
+
+	struct tm tm = { 0 };
+	gmtime_r(&now, &tm);
+	sun(&tm, ctx->longitude, ctx->latitude, &ctx->start_time, &ctx->stop_time);
+	ctx->start_time += day;
+	ctx->stop_time += day;
+
+	struct tm sunrise, sunset;
+	localtime_r(&ctx->start_time, &sunrise);
+	localtime_r(&ctx->stop_time, &sunset);
+	fprintf(stderr, "cacluated new sun trajectory: sunrise %02d:%02d, sunset %02d:%02d\n",
+			sunrise.tm_hour, sunrise.tm_min,
+			sunset.tm_hour, sunset.tm_min);
+}
+
 static void update_temperature(struct context *ctx) {
 	time_t now = time(NULL);
-	time_t t = now % 86400;
 	int temp, temp_pos;
 	double time_pos;
+	
+	recalc_stops(ctx, now);
 
 	switch (ctx->state) {
 	case HIGH_TEMP:
-		if (t > ctx->stop_time || t < ctx->start_time) {
-			ctx->state = ANIMATING_TO_LOW;
-			ctx->animation_start = now;
+		if (now < ctx->stop_time && now > ctx->start_time) {
+			temp = ctx->high_temp;
+			break;
 		}
-		temp = ctx->high_temp;
-		break;
-	case LOW_TEMP:
-		if (t > ctx->start_time || t < ctx->stop_time) {
-			ctx->state = ANIMATING_TO_HIGH;
-			ctx->animation_start = now;
-		}
-		temp = ctx->low_temp;
-		break;
-	case ANIMATING_TO_HIGH:
-		if (now > ctx->animation_start + ctx->duration) {
-			ctx->state = HIGH_TEMP;
-		}
-		time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
-		temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
-		temp = ctx->low_temp + temp_pos;
-		break;
+		ctx->state = ANIMATING_TO_LOW;
+		ctx->animation_start = ctx->stop_time;
+		// fallthrough
 	case ANIMATING_TO_LOW:
 		if (now > ctx->animation_start + ctx->duration) {
 			ctx->state = LOW_TEMP;
@@ -232,29 +250,46 @@ static void update_temperature(struct context *ctx) {
 		temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
 		temp = ctx->high_temp - temp_pos;
 		break;
+	case LOW_TEMP:
+		if (now > ctx->stop_time || now < ctx->start_time) {
+			temp = ctx->low_temp;
+			break;
+		}
+		ctx->state = ANIMATING_TO_HIGH;
+		ctx->animation_start = now;
+		// fallthrough
+	case ANIMATING_TO_HIGH:
+		if (now > ctx->animation_start + ctx->duration) {
+			ctx->state = HIGH_TEMP;
+		}
+		time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
+		temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
+		temp = ctx->low_temp + temp_pos;
+		break;
 	}
 
 	if (temp != ctx->cur_temp || ctx->new_output) {
-		fprintf(stderr, "state: %d, temp: %d, cur: %d\n", ctx->state, temp, ctx->cur_temp);
+		fprintf(stderr, "state: %s, temp: %d\n", state_names[ctx->state], temp);
 		ctx->cur_temp = temp;
+		ctx->new_output = false;
 		set_temperature(ctx);
 	}
 }
 
-static int increments(struct context *ctx) {
-	int diff = ctx->high_temp - ctx->low_temp;
-	diff /= 50;
+static int increments(struct context *ctx, int to) {
+	int diff = fabs(ctx->cur_temp - to) / 50;
 	int time = (ctx->duration * 1000) / diff;
-	return time;
+	return time > 600000 ? 600000 : time;
 }
 
 static int time_to_next_event(struct context *ctx) {
 	switch (ctx->state) {
 	case ANIMATING_TO_HIGH:
+		return increments(ctx, ctx->high_temp);
 	case ANIMATING_TO_LOW:
-		return increments(ctx);
+		return increments(ctx, ctx->low_temp);
 	default:
-		return 300000;
+		return 600000;
 	}
 }
 
@@ -309,9 +344,9 @@ static int display_dispatch_with_timeout(struct wl_display *display, int timeout
 static const char usage[] = "usage: %s [options]\n"
 "  -h          show this help message\n"
 "  -T <value>  set high temperature (default: 6500)\n"
-"  -t <value>  set low temperature (default: 3500)\n"
-"  -S <value>  set ramp up time (default: 6:00)\n"
-"  -s <value>  set ramp down time (default: 18:00)\n"
+"  -t <value>  set low temperature (default: 4000)\n"
+"  -l <value>  set latitude\n"
+"  -L <value>  set longitude\n"
 "  -d <value>  set ramping duration in minutes (default: 30)\n"
 "  -g <value>  set gamma (default: 1)\n";
 
@@ -322,21 +357,15 @@ int main(int argc, char *argv[]) {
 	// Initialize defaults
 	struct context ctx = {
 		.gamma = 1.0,
-		.start_time = 6 * 60 * 60,
-		.stop_time = 18 * 60 * 60,
 		.high_temp = 6500,
-		.low_temp = 3500,
+		.low_temp = 4000,
 		.duration = 30 * 60,
 		.state = HIGH_TEMP,
 	};
 	wl_list_init(&ctx.outputs);
 
 	int opt;
-	time_t now = time(NULL);
-	struct tm tm = { 0 };
-	struct tm current = { 0 };
-	localtime_r(&now, &current);
-	while ((opt = getopt(argc, argv, "hT:t:S:s:g:d:")) != -1) {
+	while ((opt = getopt(argc, argv, "hT:t:g:d:l:L:")) != -1) {
 		switch (opt) {
 			case 'T':
 				ctx.high_temp = strtol(optarg, NULL, 10);
@@ -344,17 +373,11 @@ int main(int argc, char *argv[]) {
 			case 't':
 				ctx.low_temp = strtol(optarg, NULL, 10);
 				break;
-			case 'S':
-				memcpy(&tm, &current, sizeof tm);
-				if (strptime(optarg, "%H:%M", &tm) != NULL) {
-					ctx.start_time = mktime(&tm) % 86400;
-				}
+			case 'l':
+				ctx.latitude = strtod(optarg, NULL);
 				break;
-			case 's':
-				memcpy(&tm, &current, sizeof tm);
-				if (strptime(optarg, "%H:%M", &tm) != NULL) {
-					ctx.stop_time = mktime(&tm) % 86400;
-				}
+			case 'L':
+				ctx.longitude = strtod(optarg, NULL);
 				break;
 			case 'd':
 				ctx.duration = strtod(optarg, NULL) * 60;
