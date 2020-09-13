@@ -20,14 +20,11 @@ static double degrees(double radians) {
 	return radians * 180.0 / M_PI;
 }
 
-static double year_radian(struct tm *tm) {
-	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
-	return 2 * M_PI / days_in_year(tm->tm_year) * (tm->tm_yday - 1 + (tm->tm_hour - 12)/24);
-}
-
 void sun(struct tm *tm, double longitude, double latitude, time_t *sunrise, time_t *sunset) {
-	double year_rad = year_radian(tm);
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
+	double year_rad = 2 * M_PI /
+		days_in_year(tm->tm_year) *
+		(tm->tm_yday - 1 + (tm->tm_hour - 12)/24);
 	double eqtime = 229.18 * (0.000075 +
 		0.001868 * cos(year_rad) -
 		0.032077 * sin(year_rad) -
