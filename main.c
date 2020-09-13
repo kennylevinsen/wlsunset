@@ -271,8 +271,7 @@ static int display_poll(struct wl_display *display, short int events, int timeou
 	return ret;
 }
 
-int display_dispatch_with_timeout(struct wl_display *display, int timeout);
-int display_dispatch_with_timeout(struct wl_display *display, int timeout) {
+static int display_dispatch_with_timeout(struct wl_display *display, int timeout) {
 	if (wl_display_prepare_read(display) == -1) {
 		return wl_display_dispatch_pending(display);
 	}
