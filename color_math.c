@@ -66,24 +66,24 @@ static int illuminant_d(int temp, double *x, double *y) {
 
 static int planckian_locus(int temp, double *x, double *y) {
 	if (temp >= 1667 && temp <= 4000) {
-		*x = -0.2661239e9 / pow(temp, 3) - 
-			0.2343589e6 / pow(temp, 2) + 
+		*x = -0.2661239e9 / pow(temp, 3) -
+			0.2343589e6 / pow(temp, 2) +
 			0.8776956e3 / temp +
 			0.179910;
 		if (temp <= 2222) {
 			*y = -1.1064814 * pow(*x, 3) -
-				1.34811020 * pow(*x, 2) + 
+				1.34811020 * pow(*x, 2) +
 				2.18555832 * (*x) -
 				0.20219683;
 		} else {
 			*y = -0.9549476 * pow(*x, 3) -
-				1.37418593 * pow(*x, 2) + 
+				1.37418593 * pow(*x, 2) +
 				2.09137015 * (*x) -
 				0.16748867;
 		}
 	} else if (temp > 4000 && temp < 25000) {
-		*x = -3.0258469e9 / pow(temp, 3) + 
-			2.1070379e6 / pow(temp, 2) + 
+		*x = -3.0258469e9 / pow(temp, 3) +
+			2.1070379e6 / pow(temp, 2) +
 			0.2226347e3 / temp +
 			0.240390;
 		*y = 3.0817580 * pow(*x, 3) -
