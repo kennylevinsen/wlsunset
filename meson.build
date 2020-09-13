@@ -46,7 +46,7 @@ m = cc.find_library('m')
 
 executable(
 	'wlsunset',
-	['main.c'],
+	['main.c', 'color_math.c'],
 	dependencies: [protocols_dep, m],
 	install: true
 )
