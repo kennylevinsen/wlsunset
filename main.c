@@ -1,5 +1,3 @@
-#define _XOPEN_SOURCE 700
-#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -52,7 +50,7 @@ struct context {
 struct output {
 	struct context *context;
 	struct wl_output *wl_output;
-	int id;
+	uint32_t id;
 	struct zwlr_gamma_control_v1 *gamma_control;
 	uint32_t ramp_size;
 	int table_fd;
@@ -105,6 +103,7 @@ static int create_gamma_table(uint32_t ramp_size, uint16_t **table) {
 
 static void gamma_control_handle_gamma_size(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control, uint32_t ramp_size) {
+	(void)gamma_control;
 	struct output *output = data;
 	output->ramp_size = ramp_size;
 	output->table_fd = create_gamma_table(ramp_size, &output->table);
@@ -116,6 +115,8 @@ static void gamma_control_handle_gamma_size(void *data,
 
 static void gamma_control_handle_failed(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control) {
+	(void)gamma_control;
+	(void)data;
 	fprintf(stderr, "failed to set gamma table\n");
 }
 
@@ -137,6 +138,7 @@ static bool setup_output(struct output *output) {
 
 static void registry_handle_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version) {
+	(void)version;
 	struct context *ctx = (struct context *)data;
 	if (strcmp(interface, wl_output_interface.name) == 0) {
 		struct output *output = calloc(1, sizeof(struct output));
@@ -156,6 +158,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
 static void registry_handle_global_remove(void *data,
 		struct wl_registry *registry, uint32_t name) {
+	(void)registry;
 	struct context *ctx = (struct context *)data;
 	struct output *output, *tmp;
 	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
@@ -277,7 +280,7 @@ static void update_temperature(struct context *ctx) {
 }
 
 static int increments(struct context *ctx, int to) {
-	int diff = fabs(ctx->cur_temp - to) / 50;
+	int diff = abs(ctx->cur_temp - to) / 50;
 	int time = (ctx->duration * 1000) / diff;
 	return time > 600000 ? 600000 : time;
 }
