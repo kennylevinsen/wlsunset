@@ -342,13 +342,13 @@ static int display_dispatch_with_timeout(struct wl_display *display, int timeout
 }
 
 static const char usage[] = "usage: %s [options]\n"
-"  -h          show this help message\n"
-"  -T <value>  set high temperature (default: 6500)\n"
-"  -t <value>  set low temperature (default: 4000)\n"
-"  -l <value>  set latitude\n"
-"  -L <value>  set longitude\n"
-"  -d <value>  set ramping duration in minutes (default: 30)\n"
-"  -g <value>  set gamma (default: 1)\n";
+"  -h            show this help message\n"
+"  -T <temp>     set high temperature (default: 6500)\n"
+"  -t <temp>     set low temperature (default: 4000)\n"
+"  -l <lat>      set latitude (e.g. 39.913)\n"
+"  -L <long>     set longitude (e.g. 116.363)\n"
+"  -d <minutes>  set ramping duration in minutes (default: 60)\n"
+"  -g <gamma>    set gamma (default: 1.0)\n";
 
 int main(int argc, char *argv[]) {
 
@@ -359,7 +359,7 @@ int main(int argc, char *argv[]) {
 		.gamma = 1.0,
 		.high_temp = 6500,
 		.low_temp = 4000,
-		.duration = 30 * 60,
+		.duration = 3600,
 		.state = HIGH_TEMP,
 	};
 	wl_list_init(&ctx.outputs);
