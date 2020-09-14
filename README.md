@@ -15,6 +15,10 @@ sudo ninja -C build install
 See the helptext (`wlsunset -h`)
 
 ## Example
+
 ```
-wlsunset -l 39.913818 -L 116.363625
+# Beijing lat/long.
+wlsunset -l 39.9 -L 116.3
 ```
+
+Greater precision than one decimal place serves no purpose other than padding the command-line (https://xkcd.com/2170/).

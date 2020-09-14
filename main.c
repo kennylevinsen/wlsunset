@@ -348,8 +348,8 @@ static const char usage[] = "usage: %s [options]\n"
 "  -h            show this help message\n"
 "  -T <temp>     set high temperature (default: 6500)\n"
 "  -t <temp>     set low temperature (default: 4000)\n"
-"  -l <lat>      set latitude (e.g. 39.913)\n"
-"  -L <long>     set longitude (e.g. 116.363)\n"
+"  -l <lat>      set latitude (e.g. 39.9)\n"
+"  -L <long>     set longitude (e.g. 116.3)\n"
 "  -d <minutes>  set ramping duration in minutes (default: 60)\n"
 "  -g <gamma>    set gamma (default: 1.0)\n";
 
