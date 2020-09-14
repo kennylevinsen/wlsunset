@@ -21,4 +21,4 @@ See the helptext (`wlsunset -h`)
 wlsunset -l 39.9 -L 116.3
 ```
 
-Greater precision than one decimal place serves no purpose other than padding the command-line (https://xkcd.com/2170/).
+Greater precision than one decimal place [serves no purpose](https://xkcd.com/2170/) other than padding the command-line.
