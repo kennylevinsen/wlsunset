@@ -224,7 +224,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	struct tm sunrise, sunset;
 	localtime_r(&ctx->start_time, &sunrise);
 	localtime_r(&ctx->stop_time, &sunset);
-	fprintf(stderr, "cacluated new sun trajectory: sunrise %02d:%02d, sunset %02d:%02d\n",
+	fprintf(stderr, "calculated new sun trajectory: sunrise %02d:%02d, sunset %02d:%02d\n",
 			sunrise.tm_hour, sunrise.tm_min,
 			sunset.tm_hour, sunset.tm_min);
 }
