@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -12,6 +13,37 @@
 #include <poll.h>
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "color_math.h"
+
+#if defined(SPEEDRUN)
+static inline int wait_adjust(int wait) {
+	fprintf(stderr, "wait in termina: %d seconds\n", wait / 1000);
+	return wait / 200;
+}
+static time_t get_time_sec(time_t *tloc) {
+	static time_t start = 0;
+	static time_t cnt = 0;
+	if (start == 0) {
+		start = time(tloc);
+	}
+	time_t now = time(tloc);
+	now = start + ((now - start) * 200) + cnt++ * 10;
+	struct tm tm;
+	localtime_r(&now, &tm);
+	fprintf(stderr, "time in termina: %02d:%02d:%02d (%ld)\n", tm.tm_hour, tm.tm_min, tm.tm_sec, now);
+	return now;
+}
+#else
+static inline int wait_adjust(int wait) {
+	return wait;
+}
+static inline time_t get_time_sec(time_t *tloc) {
+	return time(tloc);
+}
+#endif
+
+static const int LONG_SLEEP_MS = 600 * 1000;
+static const int MAX_SLEEP_S = 1800;
+static const int MIN_SLEEP_S = 10;
 
 enum state {
 	HIGH_TEMP,
@@ -229,8 +261,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 			sunset.tm_hour, sunset.tm_min);
 }
 
-static void update_temperature(struct context *ctx) {
-	time_t now = time(NULL);
+static void update_temperature(struct context *ctx, time_t now) {
 	int temp, temp_pos;
 	double time_pos;
 
@@ -288,21 +319,43 @@ start:
 	}
 }
 
-static int increments(struct context *ctx, int to) {
-	int diff = abs(ctx->cur_temp - to) / 25;
-	int time = (ctx->duration * 1000) / diff;
-	return time > 600000 ? 600000 : time;
+static int increments(struct context *ctx, int from, int to) {
+	int temp_diff = to - from;
+	assert(temp_diff > 0);
+	int time = ctx->duration * 25000 / temp_diff;
+	return time > LONG_SLEEP_MS ? LONG_SLEEP_MS : time;
 }
 
-static int time_to_next_event(struct context *ctx) {
+static int time_to_next_event(struct context *ctx, time_t now) {
+	time_t deadline;
 	switch (ctx->state) {
+	case HIGH_TEMP:
+		deadline = ctx->stop_time;
+		break;
+	case LOW_TEMP:
+		deadline = ctx->start_time;
+		if (deadline < now) {
+			deadline = ((deadline / 86400 + 1) * 86400);
+		}
+		break;
 	case ANIMATING_TO_HIGH:
-		return increments(ctx, ctx->high_temp);
 	case ANIMATING_TO_LOW:
-		return increments(ctx, ctx->low_temp);
+		return increments(ctx, ctx->low_temp, ctx->high_temp);
 	default:
-		return 600000;
+		return LONG_SLEEP_MS;
 	}
+
+	if (deadline <= now) {
+		return LONG_SLEEP_MS;
+	}
+
+	time_t wait = deadline - now;
+	if (wait > MAX_SLEEP_S) {
+		wait = MAX_SLEEP_S;
+	} else if (wait < MIN_SLEEP_S) {
+		wait = MIN_SLEEP_S;
+	}
+	return wait * 1000;
 }
 
 static int display_poll(struct wl_display *display, short int events, int timeout) {
@@ -433,9 +486,11 @@ int main(int argc, char *argv[]) {
 	wl_display_roundtrip(display);
 
 
-	update_temperature(&ctx);
-	while (display_dispatch_with_timeout(display, time_to_next_event(&ctx)) != -1) {
-		update_temperature(&ctx);
+	time_t now = get_time_sec(NULL);
+	update_temperature(&ctx, now);
+	while (display_dispatch_with_timeout(display, wait_adjust(time_to_next_event(&ctx, now))) != -1) {
+		now = get_time_sec(NULL);
+		update_temperature(&ctx, now);
 	}
 
 	return EXIT_SUCCESS;
