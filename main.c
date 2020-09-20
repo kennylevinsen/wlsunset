@@ -233,12 +233,12 @@ static void update_temperature(struct context *ctx) {
 	time_t now = time(NULL);
 	int temp, temp_pos;
 	double time_pos;
-	
+
 	recalc_stops(ctx, now);
 
 	switch (ctx->state) {
 	case HIGH_TEMP:
-		if (now < ctx->stop_time && now > ctx->start_time) {
+		if (now <= ctx->stop_time && now > ctx->start_time + ctx->duration) {
 			temp = ctx->high_temp;
 			break;
 		}
@@ -257,7 +257,7 @@ static void update_temperature(struct context *ctx) {
 		temp = ctx->high_temp - temp_pos;
 		break;
 	case LOW_TEMP:
-		if (now > ctx->stop_time || now < ctx->start_time) {
+		if (now > ctx->stop_time + ctx->duration || now <= ctx->start_time) {
 			temp = ctx->low_temp;
 			break;
 		}
