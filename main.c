@@ -404,6 +404,12 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	if (ctx.high_temp == ctx.low_temp) {
+		fprintf(stderr, "high (%d) and low (%d) temperature must not be identical\n",
+				ctx.high_temp, ctx.low_temp);
+		return -1;
+	}
+
 	struct wl_display *display = wl_display_connect(NULL);
 	if (display == NULL) {
 		fprintf(stderr, "failed to create display\n");
