@@ -262,7 +262,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 }
 
 static void update_temperature(struct context *ctx, time_t now) {
-	int temp, temp_pos;
+	int temp = 0, temp_pos;
 	double time_pos;
 
 	recalc_stops(ctx, now);
