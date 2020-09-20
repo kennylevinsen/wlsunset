@@ -29,7 +29,7 @@ static time_t get_time_sec(time_t *tloc) {
 	now = start + ((now - start) * 200) + cnt++ * 10;
 	struct tm tm;
 	localtime_r(&now, &tm);
-	fprintf(stderr, "time in termina: %02d:%02d:%02d (%ld)\n", tm.tm_hour, tm.tm_min, tm.tm_sec, now);
+	fprintf(stderr, "time in termina: %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
 	return now;
 }
 #else
