@@ -22,3 +22,7 @@ wlsunset -l 39.9 -L 116.3
 ```
 
 Greater precision than one decimal place [serves no purpose](https://xkcd.com/2170/) other than padding the command-line.
+
+# Help
+
+Go to #kennylevinsen @ chat.freenode.net to discuss, or use [~kennylevinsen/public-inbox@lists.sr.ht](https://lists.sr.ht/~kennylevinsen/public-inbox)
