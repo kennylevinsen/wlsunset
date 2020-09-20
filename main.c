@@ -237,6 +237,7 @@ static void update_temperature(struct context *ctx) {
 	recalc_stops(ctx, now);
 
 	switch (ctx->state) {
+start:
 	case HIGH_TEMP:
 		if (now <= ctx->stop_time && now > ctx->start_time + ctx->duration) {
 			temp = ctx->high_temp;
@@ -249,13 +250,14 @@ static void update_temperature(struct context *ctx) {
 		}
 		// fallthrough
 	case ANIMATING_TO_LOW:
-		if (now > ctx->animation_start + ctx->duration) {
-			ctx->state = LOW_TEMP;
+		if (now <= ctx->animation_start + ctx->duration) {
+			time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
+			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
+			temp = ctx->high_temp - temp_pos;
+			break;
 		}
-		time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
-		temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
-		temp = ctx->high_temp - temp_pos;
-		break;
+		ctx->state = LOW_TEMP;
+		// fallthrough
 	case LOW_TEMP:
 		if (now > ctx->stop_time + ctx->duration || now <= ctx->start_time) {
 			temp = ctx->low_temp;
@@ -268,13 +270,14 @@ static void update_temperature(struct context *ctx) {
 		}
 		// fallthrough
 	case ANIMATING_TO_HIGH:
-		if (now > ctx->animation_start + ctx->duration) {
-			ctx->state = HIGH_TEMP;
+		if (now <= ctx->animation_start + ctx->duration) {
+			time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
+			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
+			temp = ctx->low_temp + temp_pos;
+			break;
 		}
-		time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
-		temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
-		temp = ctx->low_temp + temp_pos;
-		break;
+		ctx->state = HIGH_TEMP;
+		goto start;
 	}
 
 	if (temp != ctx->cur_temp || ctx->new_output) {
