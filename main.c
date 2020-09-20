@@ -244,6 +244,9 @@ static void update_temperature(struct context *ctx) {
 		}
 		ctx->state = ANIMATING_TO_LOW;
 		ctx->animation_start = ctx->stop_time;
+		if (ctx->animation_start > now) {
+			ctx->animation_start -= 86400;
+		}
 		// fallthrough
 	case ANIMATING_TO_LOW:
 		if (now > ctx->animation_start + ctx->duration) {
@@ -259,7 +262,10 @@ static void update_temperature(struct context *ctx) {
 			break;
 		}
 		ctx->state = ANIMATING_TO_HIGH;
-		ctx->animation_start = now;
+		ctx->animation_start = ctx->start_time;
+		if (ctx->animation_start > now) {
+			ctx->animation_start -= 86400;
+		}
 		// fallthrough
 	case ANIMATING_TO_HIGH:
 		if (now > ctx->animation_start + ctx->duration) {
