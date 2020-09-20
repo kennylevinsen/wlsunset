@@ -286,7 +286,7 @@ static void update_temperature(struct context *ctx) {
 }
 
 static int increments(struct context *ctx, int to) {
-	int diff = abs(ctx->cur_temp - to) / 50;
+	int diff = abs(ctx->cur_temp - to) / 25;
 	int time = (ctx->duration * 1000) / diff;
 	return time > 600000 ? 600000 : time;
 }
