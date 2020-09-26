@@ -259,6 +259,8 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	fprintf(stderr, "calculated new sun trajectory: sunrise %02d:%02d, sunset %02d:%02d\n",
 			sunrise.tm_hour, sunrise.tm_min,
 			sunset.tm_hour, sunset.tm_min);
+
+	ctx->stop_time -= ctx->duration;
 }
 
 static void update_temperature(struct context *ctx, time_t now) {
