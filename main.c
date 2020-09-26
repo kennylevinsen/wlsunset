@@ -73,7 +73,6 @@ struct context {
 	time_t stop_time;
 	int cur_temp;
 	enum state state;
-	time_t animation_start;
 	bool new_output;
 
 	struct wl_list outputs;
@@ -280,11 +279,10 @@ start:
 			break;
 		}
 		ctx->state = ANIMATING_TO_LOW;
-		ctx->animation_start = ctx->stop_time;
 		// fallthrough
 	case ANIMATING_TO_LOW:
-		if (now <= ctx->animation_start + ctx->duration) {
-			time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
+		if (now > ctx->start_time && now <= ctx->stop_time + ctx->duration) {
+			time_pos = clamp(((double)now - (double)ctx->stop_time) / (double)ctx->duration);
 			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
 			temp = ctx->high_temp - temp_pos;
 			break;
@@ -297,11 +295,10 @@ start:
 			break;
 		}
 		ctx->state = ANIMATING_TO_HIGH;
-		ctx->animation_start = ctx->start_time;
 		// fallthrough
 	case ANIMATING_TO_HIGH:
-		if (now <= ctx->animation_start + ctx->duration) {
-			time_pos = clamp(((double)now - (double)ctx->animation_start) / (double)ctx->duration);
+		if (now <= ctx->start_time + ctx->duration) {
+			time_pos = clamp(((double)now - (double)ctx->start_time) / (double)ctx->duration);
 			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
 			temp = ctx->low_temp + temp_pos;
 			break;
