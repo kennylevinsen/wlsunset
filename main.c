@@ -243,7 +243,10 @@ static void set_temperature(struct context *ctx) {
 
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = now - (now % 86400);
-	if (day < ctx->stop_time) {
+	time_t true_end = ctx->stop_time + ctx->duration;
+	if (now > true_end) {
+		day += 86400;
+	} else if (day < true_end) {
 		return;
 	}
 
@@ -278,9 +281,6 @@ start:
 		}
 		ctx->state = ANIMATING_TO_LOW;
 		ctx->animation_start = ctx->stop_time;
-		if (ctx->animation_start > now) {
-			ctx->animation_start -= 86400;
-		}
 		// fallthrough
 	case ANIMATING_TO_LOW:
 		if (now <= ctx->animation_start + ctx->duration) {
@@ -298,9 +298,6 @@ start:
 		}
 		ctx->state = ANIMATING_TO_HIGH;
 		ctx->animation_start = ctx->start_time;
-		if (ctx->animation_start > now) {
-			ctx->animation_start -= 86400;
-		}
 		// fallthrough
 	case ANIMATING_TO_HIGH:
 		if (now <= ctx->animation_start + ctx->duration) {
