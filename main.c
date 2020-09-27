@@ -243,7 +243,9 @@ static void set_temperature(struct context *ctx) {
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = now - (now % 86400);
 	time_t true_end = ctx->stop_time + ctx->duration;
-	if (now > true_end) {
+	if (ctx->stop_time == 0) {
+		// First calculation
+	} else if (now > true_end) {
 		day += 86400;
 	} else if (day < true_end) {
 		return;
