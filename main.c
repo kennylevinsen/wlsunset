@@ -92,7 +92,7 @@ struct output {
 static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
 
 static int create_anonymous_file(off_t size) {
-	char template[] = "/tmp/wlroots-shared-XXXXXX";
+	char template[] = "/tmp/wlsunset-shared-XXXXXX";
 	int fd = mkstemp(template);
 	if (fd < 0) {
 		return -1;
