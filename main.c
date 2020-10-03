@@ -140,6 +140,8 @@ static void gamma_control_handle_gamma_size(void *data,
 	output->table_fd = create_gamma_table(ramp_size, &output->table);
 	output->context->new_output = true;
 	if (output->table_fd < 0) {
+		fprintf(stderr, "could not create gamma table for output %d\n",
+				output->id);
 		exit(EXIT_FAILURE);
 	}
 }
@@ -147,8 +149,9 @@ static void gamma_control_handle_gamma_size(void *data,
 static void gamma_control_handle_failed(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control) {
 	(void)gamma_control;
-	(void)data;
-	fprintf(stderr, "failed to set gamma table\n");
+	struct output *output = data;
+	fprintf(stderr, "failed to set gamma table for output %d\n",
+			output->id);
 }
 
 static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
@@ -156,15 +159,19 @@ static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
 	.failed = gamma_control_handle_failed,
 };
 
-static bool setup_output(struct output *output) {
-	if (gamma_control_manager == NULL || output->gamma_control != NULL) {
-		return false;
+static void setup_output(struct output *output) {
+	if (output->gamma_control != NULL) {
+		return;
+	}
+	if (gamma_control_manager == NULL) {
+		fprintf(stderr, "skipping setup of output %d: gamma_control_manager missing\n",
+				output->id);
+		return;
 	}
 	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
 		gamma_control_manager, output->wl_output);
 	zwlr_gamma_control_v1_add_listener(output->gamma_control,
 		&gamma_control_listener, output);
-	return true;
 }
 
 static void registry_handle_global(void *data, struct wl_registry *registry,
@@ -229,6 +236,7 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, dou
 static void set_temperature(struct context *ctx) {
 	double rw, gw, bw;
 	calc_whitepoint(ctx->cur_temp, &rw, &gw, &bw);
+	fprintf(stderr, "setting temperature: %d\n", ctx->cur_temp);
 
 	struct output *output;
 	wl_list_for_each(output, &ctx->outputs, link) {
@@ -276,6 +284,7 @@ static void update_temperature(struct context *ctx, time_t now) {
 
 	recalc_stops(ctx, now);
 
+	enum state old_state = ctx->state;
 	switch (ctx->state) {
 start:
 	case HIGH_TEMP:
@@ -312,8 +321,11 @@ start:
 		goto start;
 	}
 
+	if (ctx->state != old_state) {
+		fprintf(stderr, "changed state: %s\n", state_names[ctx->state]);
+	}
+
 	if (temp != ctx->cur_temp || ctx->new_output) {
-		fprintf(stderr, "state: %s, temp: %d\n", state_names[ctx->state], temp);
 		ctx->cur_temp = temp;
 		ctx->new_output = false;
 		set_temperature(ctx);
