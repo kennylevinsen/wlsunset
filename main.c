@@ -363,13 +363,7 @@ static int display_poll(struct wl_display *display, short int events, int timeou
 	struct pollfd pfd[1];
 	pfd[0].fd = wl_display_get_fd(display);
 	pfd[0].events = events;
-
-	int ret;
-	do {
-		ret = poll(pfd, 1, timeout);
-	} while (ret == -1 && errno == EINTR);
-
-	return ret;
+	return poll(pfd, 1, timeout);
 }
 
 static int display_dispatch_with_timeout(struct wl_display *display, int timeout) {
