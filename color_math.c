@@ -4,9 +4,9 @@
 #include <time.h>
 #include "color_math.h"
 
-#define SOLAR_HORIZON			90.833
-#define SOLAR_START_CIVIL_TWILIGHT	6.0
-#define SOLAR_END_CIVIL_TWILIGHT	3.0
+#define SOLAR_HORIZON		90.833
+#define SOLAR_START_TWILIGHT	6.0
+#define SOLAR_END_TWILIGHT	-3.0
 
 static int is_leap(int year) {
 	return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
@@ -49,8 +49,8 @@ static void sun_angle(struct tm *tm, double longitude, double latitude, time_t *
 }
 
 void sun(struct tm *tm, double longitude, double latitude, time_t *dawn, time_t *sunrise, time_t *sunset, time_t *dusk) {
-	sun_angle(tm, longitude, latitude, dawn, dusk, SOLAR_HORIZON + SOLAR_START_CIVIL_TWILIGHT);
-	sun_angle(tm, longitude, latitude, sunrise, sunset, SOLAR_HORIZON + SOLAR_END_CIVIL_TWILIGHT);
+	sun_angle(tm, longitude, latitude, dawn, dusk, SOLAR_HORIZON + SOLAR_START_TWILIGHT);
+	sun_angle(tm, longitude, latitude, sunrise, sunset, SOLAR_HORIZON + SOLAR_END_TWILIGHT);
 }
 
 static int illuminant_d(int temp, double *x, double *y) {
