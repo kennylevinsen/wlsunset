@@ -197,7 +197,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 	(void)version;
 	struct context *ctx = (struct context *)data;
 	if (strcmp(interface, wl_output_interface.name) == 0) {
-		fprintf(stderr, "adding output %d\n", name);
+		fprintf(stderr, "registry: adding output %d\n", name);
 		struct output *output = calloc(1, sizeof(struct output));
 		output->id = name;
 		output->wl_output = wl_registry_bind(registry, name,
@@ -220,7 +220,7 @@ static void registry_handle_global_remove(void *data,
 	struct output *output, *tmp;
 	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
 		if (output->id == name) {
-			fprintf(stderr, "removing output %d\n", name);
+			fprintf(stderr, "registry: removing output %d\n", name);
 			wl_list_remove(&output->link);
 			if (output->gamma_control != NULL) {
 				zwlr_gamma_control_v1_destroy(output->gamma_control);
