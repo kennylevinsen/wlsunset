@@ -60,10 +60,10 @@ enum state {
 };
 
 static char *state_names[] = {
-	"high temperature",
-	"animating to low temperature",
-	"low temperature",
-	"animating to high temperature",
+	"day",
+	"dusk",
+	"night",
+	"dawn",
 	NULL
 };
 
@@ -338,7 +338,7 @@ start:
 	}
 
 	if (ctx->state != old_state) {
-		fprintf(stderr, "changed state: %s\n", state_names[ctx->state]);
+		fprintf(stderr, "changed state to %s\n", state_names[ctx->state]);
 	}
 
 	if (temp != ctx->cur_temp || ctx->new_output) {
