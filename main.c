@@ -461,6 +461,10 @@ int main(int argc, char *argv[]) {
 	};
 	wl_list_init(&ctx.outputs);
 
+#ifdef SPEEDRUN
+	fprintf(stderr, "warning: speedrun mode enabled\n");
+#endif
+
 	int opt;
 	while ((opt = getopt(argc, argv, "hT:t:g:d:l:L:")) != -1) {
 		switch (opt) {
