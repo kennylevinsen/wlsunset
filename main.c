@@ -11,46 +11,59 @@
 #include <wayland-client.h>
 #include <time.h>
 #include <poll.h>
+#include <signal.h>
+
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "color_math.h"
 
 #if defined(SPEEDRUN)
-static inline int wait_adjust(int wait) {
-	fprintf(stderr, "wait in termina: %d seconds\n", wait / 1000);
-	return wait / 1000;
+static time_t start = 0;
+static void init_time(time_t *tloc) {
+	(void)tloc;
+	tzset();
+	struct timespec realtime;
+	clock_gettime(CLOCK_REALTIME, &realtime);
+	start = realtime.tv_sec;
 }
 static time_t get_time_sec(time_t *tloc) {
-	static time_t start = 0;
-	static time_t monostart = 0;
-	if (start == 0) {
-		start = time(tloc);
-	}
-
-	struct timespec monotime;
-	clock_gettime(CLOCK_MONOTONIC, &monotime);
-	time_t now = monotime.tv_sec * 1000 + monotime.tv_nsec / 1000000;
-	if (monostart == 0) {
-		monostart = now;
-	}
-	now = now - monostart + start;
+	(void)tloc;
+	struct timespec realtime;
+	clock_gettime(CLOCK_REALTIME, &realtime);
+	time_t now = start + ((realtime.tv_sec - start) * 1000 + realtime.tv_nsec / 1000000);
 
 	struct tm tm;
 	localtime_r(&now, &tm);
 	fprintf(stderr, "time in termina: %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
 	return now;
 }
+static int set_timer(timer_t timer, time_t deadline) {
+	time_t diff = deadline - start;
+	struct itimerspec timerspec = {{0}, {0}};
+	timerspec.it_value.tv_sec = start + diff / 1000;
+	timerspec.it_value.tv_nsec = (diff % 1000) * 1000000;
+
+	struct tm tm;
+	localtime_r(&deadline, &tm);
+	fprintf(stderr, "sleeping until %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	return timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
+}
 #else
-static inline int wait_adjust(int wait) {
-	return wait;
+static inline void init_time(time_t *tloc) {
+	(void)tloc;
+	tzset();
 }
 static inline time_t get_time_sec(time_t *tloc) {
 	return time(tloc);
 }
+static int set_timer(timer_t timer, time_t deadline) {
+	struct itimerspec timerspec = {{0}, {0}};
+	timerspec.it_value.tv_sec = deadline;
+	return timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
+}
 #endif
 
-static const int LONG_SLEEP_MS = 600 * 1000;
-static const int MAX_SLEEP_S = 1800;
-static const int MIN_SLEEP_S = 10;
+static const int LONG_SLEEP = 600;
 
 enum state {
 	HIGH_TEMP,
@@ -76,10 +89,13 @@ struct context {
 	double longitude;
 	double latitude;
 
+	timer_t timer;
+
 	time_t dawn;
 	time_t sunrise;
 	time_t sunset;
 	time_t dusk;
+
 	int cur_temp;
 	enum state state;
 	bool new_output;
@@ -317,28 +333,28 @@ static void update_temperature(struct context *ctx, time_t now) {
 	switch (ctx->state) {
 start:
 	case HIGH_TEMP:
-		if (now <= ctx->sunset && now > ctx->sunrise) {
+		if (now < ctx->sunset && now >= ctx->sunrise) {
 			temp = ctx->high_temp;
 			break;
 		}
 		ctx->state = ANIMATING_TO_LOW;
 		// fallthrough
 	case ANIMATING_TO_LOW:
-		if (now > ctx->dawn && now <= ctx->dusk) {
+		if (now >= ctx->dawn && now < ctx->dusk) {
 			temp = interpolate_temperature(now, ctx->sunset, ctx->dusk, ctx->high_temp, ctx->low_temp);
 			break;
 		}
 		ctx->state = LOW_TEMP;
 		// fallthrough
 	case LOW_TEMP:
-		if (now > ctx->dusk || now <= ctx->dawn) {
+		if (now >= ctx->dusk || now < ctx->dawn) {
 			temp = ctx->low_temp;
 			break;
 		}
 		ctx->state = ANIMATING_TO_HIGH;
 		// fallthrough
 	case ANIMATING_TO_HIGH:
-		if (now <= ctx->sunrise) {
+		if (now < ctx->sunrise) {
 			temp = interpolate_temperature(now, ctx->dawn, ctx->sunrise, ctx->low_temp, ctx->high_temp);
 			break;
 		}
@@ -359,11 +375,11 @@ start:
 
 static int increments(int temp_diff, int duration) {
 	assert(temp_diff > 0);
-	int time = duration * 25000 / temp_diff;
-	return time > LONG_SLEEP_MS ? LONG_SLEEP_MS : time;
+	int time = duration * 25 / temp_diff;
+	return time > LONG_SLEEP ? LONG_SLEEP : time;
 }
 
-static int time_to_next_event(struct context *ctx, time_t now) {
+static void update_timer(struct context *ctx, time_t now) {
 	time_t deadline;
 	switch (ctx->state) {
 	case HIGH_TEMP:
@@ -376,34 +392,31 @@ static int time_to_next_event(struct context *ctx, time_t now) {
 		}
 		break;
 	case ANIMATING_TO_HIGH:
-		return increments(ctx->high_temp - ctx->low_temp, ctx->sunrise - ctx->dawn);
+		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->sunrise - ctx->dawn);
+		break;
 	case ANIMATING_TO_LOW:
-		return increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
+		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
+		break;
 	default:
-		return LONG_SLEEP_MS;
+		abort();
+		break;
 	}
 
-	if (deadline <= now) {
-		return LONG_SLEEP_MS;
-	}
-
-	time_t wait = deadline - now;
-	if (wait > MAX_SLEEP_S) {
-		wait = MAX_SLEEP_S;
-	} else if (wait < MIN_SLEEP_S) {
-		wait = MIN_SLEEP_S;
-	}
-	return wait * 1000;
+	assert(deadline > now);
+	set_timer(ctx->timer, deadline);
 }
 
 static int display_poll(struct wl_display *display, short int events, int timeout) {
 	struct pollfd pfd[1];
 	pfd[0].fd = wl_display_get_fd(display);
 	pfd[0].events = events;
-	return poll(pfd, 1, timeout);
+	if (poll(pfd, 1, timeout) == -1) {
+		return errno == EINTR ? 0 : -1;
+	}
+	return 0;
 }
 
-static int display_dispatch_with_timeout(struct wl_display *display, int timeout) {
+static int display_dispatch(struct wl_display *display, int timeout) {
 	if (wl_display_prepare_read(display) == -1) {
 		return wl_display_dispatch_pending(display);
 	}
@@ -447,9 +460,16 @@ static const char usage[] = "usage: %s [options]\n"
 "  -d <minutes>  set ramping duration in minutes (default: 60)\n"
 "  -g <gamma>    set gamma (default: 1.0)\n";
 
+static int timer_fired = 0;
+
+static void timer_signal(int signal) {
+	(void)signal;
+	timer_fired = true;
+}
+
 int main(int argc, char *argv[]) {
 
-	tzset();
+	init_time(NULL);
 
 	// Initialize defaults
 	struct context ctx = {
@@ -460,6 +480,21 @@ int main(int argc, char *argv[]) {
 		.state = HIGH_TEMP,
 	};
 	wl_list_init(&ctx.outputs);
+
+
+	struct sigaction timer_action = {
+		.sa_handler = timer_signal,
+		.sa_flags = 0,
+	};
+	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
+		fprintf(stderr, "could not configure alarm handler: %s\n", strerror(errno));
+		return 1;
+	}
+
+	if (timer_create(CLOCK_REALTIME, NULL, &ctx.timer) == -1) {
+		fprintf(stderr, "could not configure timer: %s\n", strerror(errno));
+		return 1;
+	}
 
 #ifdef SPEEDRUN
 	fprintf(stderr, "warning: speedrun mode enabled\n");
@@ -524,9 +559,14 @@ int main(int argc, char *argv[]) {
 
 	time_t now = get_time_sec(NULL);
 	update_temperature(&ctx, now);
-	while (display_dispatch_with_timeout(display, wait_adjust(time_to_next_event(&ctx, now))) != -1) {
-		now = get_time_sec(NULL);
-		update_temperature(&ctx, now);
+	update_timer(&ctx, now);
+	while (display_dispatch(display, -1) != -1) {
+		if (timer_fired) {
+			timer_fired = false;
+			now = get_time_sec(NULL);
+			update_temperature(&ctx, now);
+			update_timer(&ctx, now);
+		}
 	}
 
 	return EXIT_SUCCESS;

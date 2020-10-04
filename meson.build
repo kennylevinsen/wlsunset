@@ -45,10 +45,11 @@ protocols_dep = declare_dependency(link_with: lib_protocols, sources: protocols_
 
 cc = meson.get_compiler('c')
 m = cc.find_library('m')
+rt = cc.find_library('rt')
 
 executable(
 	'wlsunset',
 	['main.c', 'color_math.c'],
-	dependencies: [protocols_dep, m],
+	dependencies: [protocols_dep, m, rt],
 	install: true
 )
