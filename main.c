@@ -76,8 +76,10 @@ struct context {
 	double longitude;
 	double latitude;
 
-	time_t start_time;
-	time_t stop_time;
+	time_t dawn;
+	time_t sunrise;
+	time_t sunset;
+	time_t dusk;
 	int cur_temp;
 	enum state state;
 	bool new_output;
@@ -269,68 +271,75 @@ static void set_temperature(struct context *ctx) {
 
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = now - (now % 86400);
-	time_t true_end = ctx->stop_time + ctx->duration;
-	if (ctx->stop_time == 0) {
+	if (ctx->dusk == 0) {
 		// First calculation
-	} else if (now > true_end) {
+	} else if (now > ctx->dusk) {
 		day += 86400;
-	} else if (day < true_end) {
+	} else if (day < ctx->dusk) {
 		return;
 	}
 
 	struct tm tm = { 0 };
 	gmtime_r(&now, &tm);
-	sun(&tm, ctx->longitude, ctx->latitude, &ctx->start_time, &ctx->stop_time);
-	ctx->start_time += day;
-	ctx->stop_time += day;
+	sun(&tm, ctx->longitude, ctx->latitude, &ctx->dawn, &ctx->sunrise, &ctx->sunset, &ctx->dusk);
+	if (ctx->duration != -1) {
+		ctx->dawn = ctx->sunrise - ctx->duration;
+		ctx->dusk = ctx->sunset + ctx->duration;
+	}
+	ctx->dawn += day;
+	ctx->sunrise += day;
+	ctx->sunset += day;
+	ctx->dusk += day;
 
-	struct tm sunrise, sunset;
-	localtime_r(&ctx->start_time, &sunrise);
-	localtime_r(&ctx->stop_time, &sunset);
-	fprintf(stderr, "calculated new sun trajectory: sunrise %02d:%02d, sunset %02d:%02d\n",
+	struct tm dawn, sunrise, sunset, dusk;
+	localtime_r(&ctx->dawn, &dawn);
+	localtime_r(&ctx->sunrise, &sunrise);
+	localtime_r(&ctx->sunset, &sunset);
+	localtime_r(&ctx->dusk, &dusk);
+	fprintf(stderr, "calculated new sun trajectory: dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, dusk %02d:%02d\n",
+			dawn.tm_hour, dusk.tm_min,
 			sunrise.tm_hour, sunrise.tm_min,
-			sunset.tm_hour, sunset.tm_min);
+			sunset.tm_hour, sunset.tm_min,
+			dusk.tm_hour, dusk.tm_min);
+}
 
-	ctx->stop_time -= ctx->duration;
+static int interpolate_temperature(time_t now, time_t start, time_t stop, int temp_start, int temp_stop) {
+	double time_pos = clamp((double)(now - start) / (double)(stop - start));
+	int temp_pos = (double)(temp_stop - temp_start) * time_pos;
+	return temp_start + temp_pos;
 }
 
 static void update_temperature(struct context *ctx, time_t now) {
-	int temp = 0, temp_pos;
-	double time_pos;
-
 	recalc_stops(ctx, now);
 
+	int temp = 0;
 	enum state old_state = ctx->state;
 	switch (ctx->state) {
 start:
 	case HIGH_TEMP:
-		if (now <= ctx->stop_time && now > ctx->start_time + ctx->duration) {
+		if (now <= ctx->sunset && now > ctx->sunrise) {
 			temp = ctx->high_temp;
 			break;
 		}
 		ctx->state = ANIMATING_TO_LOW;
 		// fallthrough
 	case ANIMATING_TO_LOW:
-		if (now > ctx->start_time && now <= ctx->stop_time + ctx->duration) {
-			time_pos = clamp(((double)now - (double)ctx->stop_time) / (double)ctx->duration);
-			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
-			temp = ctx->high_temp - temp_pos;
+		if (now > ctx->dawn && now <= ctx->dusk) {
+			temp = interpolate_temperature(now, ctx->sunset, ctx->dusk, ctx->high_temp, ctx->low_temp);
 			break;
 		}
 		ctx->state = LOW_TEMP;
 		// fallthrough
 	case LOW_TEMP:
-		if (now > ctx->stop_time + ctx->duration || now <= ctx->start_time) {
+		if (now > ctx->dusk || now <= ctx->dawn) {
 			temp = ctx->low_temp;
 			break;
 		}
 		ctx->state = ANIMATING_TO_HIGH;
 		// fallthrough
 	case ANIMATING_TO_HIGH:
-		if (now <= ctx->start_time + ctx->duration) {
-			time_pos = clamp(((double)now - (double)ctx->start_time) / (double)ctx->duration);
-			temp_pos = (double)(ctx->high_temp - ctx->low_temp) * time_pos;
-			temp = ctx->low_temp + temp_pos;
+		if (now <= ctx->sunrise) {
+			temp = interpolate_temperature(now, ctx->dawn, ctx->sunrise, ctx->low_temp, ctx->high_temp);
 			break;
 		}
 		ctx->state = HIGH_TEMP;
@@ -348,10 +357,9 @@ start:
 	}
 }
 
-static int increments(struct context *ctx, int from, int to) {
-	int temp_diff = to - from;
+static int increments(int temp_diff, int duration) {
 	assert(temp_diff > 0);
-	int time = ctx->duration * 25000 / temp_diff;
+	int time = duration * 25000 / temp_diff;
 	return time > LONG_SLEEP_MS ? LONG_SLEEP_MS : time;
 }
 
@@ -359,17 +367,18 @@ static int time_to_next_event(struct context *ctx, time_t now) {
 	time_t deadline;
 	switch (ctx->state) {
 	case HIGH_TEMP:
-		deadline = ctx->stop_time;
+		deadline = ctx->sunset;
 		break;
 	case LOW_TEMP:
-		deadline = ctx->start_time;
+		deadline = ctx->dawn;
 		if (deadline < now) {
 			deadline = ((deadline / 86400 + 1) * 86400);
 		}
 		break;
 	case ANIMATING_TO_HIGH:
+		return increments(ctx->high_temp - ctx->low_temp, ctx->sunrise - ctx->dawn);
 	case ANIMATING_TO_LOW:
-		return increments(ctx, ctx->low_temp, ctx->high_temp);
+		return increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
 	default:
 		return LONG_SLEEP_MS;
 	}
@@ -447,7 +456,7 @@ int main(int argc, char *argv[]) {
 		.gamma = 1.0,
 		.high_temp = 6500,
 		.low_temp = 4000,
-		.duration = 3600,
+		.duration = -1,
 		.state = HIGH_TEMP,
 	};
 	wl_list_init(&ctx.outputs);
@@ -468,6 +477,7 @@ int main(int argc, char *argv[]) {
 				ctx.longitude = strtod(optarg, NULL);
 				break;
 			case 'd':
+				fprintf(stderr, "using animation duration override\n");
 				ctx.duration = strtod(optarg, NULL) * 60;
 				break;
 			case 'g':
@@ -507,7 +517,6 @@ int main(int argc, char *argv[]) {
 		setup_output(output);
 	}
 	wl_display_roundtrip(display);
-
 
 	time_t now = get_time_sec(NULL);
 	update_temperature(&ctx, now);

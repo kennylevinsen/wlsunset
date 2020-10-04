@@ -4,6 +4,10 @@
 #include <time.h>
 #include "color_math.h"
 
+#define SOLAR_HORIZON			90.833
+#define SOLAR_START_CIVIL_TWILIGHT	6.0
+#define SOLAR_END_CIVIL_TWILIGHT	3.0
+
 static int is_leap(int year) {
 	return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
@@ -20,7 +24,7 @@ static double degrees(double radians) {
 	return radians * 180.0 / M_PI;
 }
 
-void sun(struct tm *tm, double longitude, double latitude, time_t *sunrise, time_t *sunset) {
+static void sun_angle(struct tm *tm, double longitude, double latitude, time_t *sunrise, time_t *sunset, double angle) {
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
 	double year_rad = 2 * M_PI /
 		days_in_year(tm->tm_year) *
@@ -38,10 +42,15 @@ void sun(struct tm *tm, double longitude, double latitude, time_t *sunrise, time
 		0.002697 * cos(3*year_rad) +
 		0.00148 * sin(3*year_rad);
 	double ha = degrees(acos(
-		cos(radians(90.833)) / (cos(radians(latitude)) * cos(decl)) -
+		cos(radians(angle)) / (cos(radians(latitude)) * cos(decl)) -
 		tan(radians(latitude)) * tan(decl)));
 	*sunrise = (720 - 4 * (longitude + fabs(ha)) - eqtime) * 60;
 	*sunset = (720 - 4 * (longitude - fabs(ha)) - eqtime) * 60;
+}
+
+void sun(struct tm *tm, double longitude, double latitude, time_t *dawn, time_t *sunrise, time_t *sunset, time_t *dusk) {
+	sun_angle(tm, longitude, latitude, dawn, dusk, SOLAR_HORIZON + SOLAR_START_CIVIL_TWILIGHT);
+	sun_angle(tm, longitude, latitude, sunrise, sunset, SOLAR_HORIZON + SOLAR_END_CIVIL_TWILIGHT);
 }
 
 static int illuminant_d(int temp, double *x, double *y) {
