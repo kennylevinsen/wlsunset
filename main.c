@@ -254,7 +254,7 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, dou
 static void set_temperature(struct context *ctx) {
 	double rw, gw, bw;
 	calc_whitepoint(ctx->cur_temp, &rw, &gw, &bw);
-	fprintf(stderr, "setting temperature: %d\n", ctx->cur_temp);
+	fprintf(stderr, "setting temperature to %d K\n", ctx->cur_temp);
 
 	struct output *output;
 	wl_list_for_each(output, &ctx->outputs, link) {
