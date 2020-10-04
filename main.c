@@ -144,6 +144,9 @@ static void gamma_control_handle_gamma_size(void *data,
 	(void)gamma_control;
 	struct output *output = data;
 	output->ramp_size = ramp_size;
+	if (output->table_fd != -1) {
+		close(output->table_fd);
+	}
 	output->table_fd = create_gamma_table(ramp_size, &output->table);
 	output->context->new_output = true;
 	if (output->table_fd < 0) {
@@ -157,8 +160,14 @@ static void gamma_control_handle_failed(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control) {
 	(void)gamma_control;
 	struct output *output = data;
-	fprintf(stderr, "failed to set gamma table for output %d\n",
+	fprintf(stderr, "gamma control of output %d failed\n",
 			output->id);
+	zwlr_gamma_control_v1_destroy(output->gamma_control);
+	output->gamma_control = NULL;
+	if (output->table_fd != -1) {
+		close(output->table_fd);
+		output->table_fd = -1;
+	}
 }
 
 static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
