@@ -17,16 +17,23 @@
 #if defined(SPEEDRUN)
 static inline int wait_adjust(int wait) {
 	fprintf(stderr, "wait in termina: %d seconds\n", wait / 1000);
-	return wait / 200;
+	return wait / 1000;
 }
 static time_t get_time_sec(time_t *tloc) {
 	static time_t start = 0;
-	static time_t cnt = 0;
+	static time_t monostart = 0;
 	if (start == 0) {
 		start = time(tloc);
 	}
-	time_t now = time(tloc);
-	now = start + ((now - start) * 200) + cnt++ * 10;
+
+	struct timespec monotime;
+	clock_gettime(CLOCK_MONOTONIC, &monotime);
+	time_t now = monotime.tv_sec * 1000 + monotime.tv_nsec / 1000000;
+	if (monostart == 0) {
+		monostart = now;
+	}
+	now = now - monostart + start;
+
 	struct tm tm;
 	localtime_r(&now, &tm);
 	fprintf(stderr, "time in termina: %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
