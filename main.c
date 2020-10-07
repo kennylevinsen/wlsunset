@@ -1,17 +1,17 @@
 #include <assert.h>
 #include <errno.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
-#include <time.h>
-#include <poll.h>
-#include <signal.h>
 
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "color_math.h"
@@ -65,53 +65,34 @@ static int set_timer(timer_t timer, time_t deadline) {
 
 static const int LONG_SLEEP = 600;
 
-enum state {
-	HIGH_TEMP,
-	ANIMATING_TO_LOW,
-	LOW_TEMP,
-	ANIMATING_TO_HIGH,
-};
-
-static char *state_names[] = {
-	"day",
-	"dusk",
-	"night",
-	"dawn",
-	NULL
-};
-
 struct context {
-	double gamma;
-
 	int high_temp;
 	int low_temp;
 	int duration;
 	double longitude;
 	double latitude;
 
-	timer_t timer;
-
 	time_t dawn;
 	time_t sunrise;
 	time_t sunset;
 	time_t dusk;
 
-	int cur_temp;
-	enum state state;
 	bool new_output;
-
 	struct wl_list outputs;
+	timer_t timer;
 };
 
 struct output {
+	struct wl_list link;
+
 	struct context *context;
 	struct wl_output *wl_output;
-	uint32_t id;
 	struct zwlr_gamma_control_v1 *gamma_control;
-	uint32_t ramp_size;
+
 	int table_fd;
+	uint32_t id;
+	uint32_t ramp_size;
 	uint16_t *table;
-	struct wl_list link;
 };
 
 static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
@@ -267,18 +248,18 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, dou
 	}
 }
 
-static void set_temperature(struct context *ctx) {
+static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
 	double rw, gw, bw;
-	calc_whitepoint(ctx->cur_temp, &rw, &gw, &bw);
-	fprintf(stderr, "setting temperature to %d K\n", ctx->cur_temp);
+	calc_whitepoint(temp, &rw, &gw, &bw);
+	fprintf(stderr, "setting temperature to %d K\n", temp);
 
 	struct output *output;
-	wl_list_for_each(output, &ctx->outputs, link) {
+	wl_list_for_each(output, outputs, link) {
 		if (output->gamma_control == NULL || output->table_fd == -1) {
 			continue;
 		}
 		fill_gamma_table(output->table, output->ramp_size,
-				rw, gw, bw, ctx->gamma);
+				rw, gw, bw, gamma);
 		lseek(output->table_fd, 0, SEEK_SET);
 		zwlr_gamma_control_v1_set_gamma(output->gamma_control,
 				output->table_fd);
@@ -325,51 +306,17 @@ static int interpolate_temperature(time_t now, time_t start, time_t stop, int te
 	return temp_start + temp_pos;
 }
 
-static void update_temperature(struct context *ctx, time_t now) {
-	recalc_stops(ctx, now);
-
-	int temp = 0;
-	enum state old_state = ctx->state;
-	switch (ctx->state) {
-start:
-	case HIGH_TEMP:
-		if (now < ctx->sunset && now >= ctx->sunrise) {
-			temp = ctx->high_temp;
-			break;
-		}
-		ctx->state = ANIMATING_TO_LOW;
-		// fallthrough
-	case ANIMATING_TO_LOW:
-		if (now >= ctx->dawn && now < ctx->dusk) {
-			temp = interpolate_temperature(now, ctx->sunset, ctx->dusk, ctx->high_temp, ctx->low_temp);
-			break;
-		}
-		ctx->state = LOW_TEMP;
-		// fallthrough
-	case LOW_TEMP:
-		if (now >= ctx->dusk || now < ctx->dawn) {
-			temp = ctx->low_temp;
-			break;
-		}
-		ctx->state = ANIMATING_TO_HIGH;
-		// fallthrough
-	case ANIMATING_TO_HIGH:
-		if (now < ctx->sunrise) {
-			temp = interpolate_temperature(now, ctx->dawn, ctx->sunrise, ctx->low_temp, ctx->high_temp);
-			break;
-		}
-		ctx->state = HIGH_TEMP;
-		goto start;
-	}
-
-	if (ctx->state != old_state) {
-		fprintf(stderr, "changed state to %s\n", state_names[ctx->state]);
-	}
-
-	if (temp != ctx->cur_temp || ctx->new_output) {
-		ctx->cur_temp = temp;
-		ctx->new_output = false;
-		set_temperature(ctx);
+static int get_temperature(const struct context *ctx, time_t now) {
+	if (now < ctx->dawn) {
+		return ctx->low_temp;
+	} else if (now < ctx->sunrise) {
+		return interpolate_temperature(now, ctx->dawn, ctx->sunrise, ctx->low_temp, ctx->high_temp);
+	} else if (now < ctx->sunset) {
+		return ctx->high_temp;
+	} else if (now < ctx->dusk) {
+		return interpolate_temperature(now, ctx->sunset, ctx->dusk, ctx->high_temp, ctx->low_temp);
+	} else {
+		return ctx->low_temp;
 	}
 }
 
@@ -379,31 +326,23 @@ static int increments(int temp_diff, int duration) {
 	return time > LONG_SLEEP ? LONG_SLEEP : time;
 }
 
-static void update_timer(struct context *ctx, time_t now) {
+static void update_timer(struct context *ctx, timer_t timer, time_t now) {
 	time_t deadline;
-	switch (ctx->state) {
-	case HIGH_TEMP:
-		deadline = ctx->sunset;
-		break;
-	case LOW_TEMP:
+	if (now < ctx->dawn) {
 		deadline = ctx->dawn;
-		if (deadline < now) {
-			deadline = ((deadline / 86400 + 1) * 86400);
-		}
-		break;
-	case ANIMATING_TO_HIGH:
+	} else if (now < ctx->sunrise) {
 		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->sunrise - ctx->dawn);
-		break;
-	case ANIMATING_TO_LOW:
+	} else if (now < ctx->sunset) {
+		deadline = ctx->sunset;
+	} else if (now < ctx->dusk) {
 		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
-		break;
-	default:
-		abort();
-		break;
+	} else {
+		deadline = ctx->dawn;
+		deadline = ((deadline / 86400 + 1) * 86400);
 	}
 
 	assert(deadline > now);
-	set_timer(ctx->timer, deadline);
+	set_timer(timer, deadline);
 }
 
 static int display_poll(struct wl_display *display, short int events, int timeout) {
@@ -473,14 +412,12 @@ int main(int argc, char *argv[]) {
 
 	// Initialize defaults
 	struct context ctx = {
-		.gamma = 1.0,
 		.high_temp = 6500,
 		.low_temp = 4000,
 		.duration = -1,
-		.state = HIGH_TEMP,
 	};
+	double gamma = 1.0;
 	wl_list_init(&ctx.outputs);
-
 
 	struct sigaction timer_action = {
 		.sa_handler = timer_signal,
@@ -520,7 +457,7 @@ int main(int argc, char *argv[]) {
 				ctx.duration = strtod(optarg, NULL) * 60;
 				break;
 			case 'g':
-				ctx.gamma = strtod(optarg, NULL);
+				gamma = strtod(optarg, NULL);
 				break;
 			case 'h':
 			default:
@@ -557,15 +494,31 @@ int main(int argc, char *argv[]) {
 	}
 	wl_display_roundtrip(display);
 
+
 	time_t now = get_time_sec(NULL);
-	update_temperature(&ctx, now);
-	update_timer(&ctx, now);
+	recalc_stops(&ctx, now);
+
+	int temp = get_temperature(&ctx, now);
+	set_temperature(&ctx.outputs, temp, gamma);
+	update_timer(&ctx, ctx.timer, now);
+
+	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {
 		if (timer_fired) {
 			timer_fired = false;
+
 			now = get_time_sec(NULL);
-			update_temperature(&ctx, now);
-			update_timer(&ctx, now);
+			recalc_stops(&ctx, now);
+			update_timer(&ctx, ctx.timer, now);
+
+			if ((temp = get_temperature(&ctx, now)) != old_temp) {
+				old_temp = temp;
+				ctx.new_output = false;
+				set_temperature(&ctx.outputs, temp, gamma);
+			}
+		} else if (ctx.new_output) {
+			ctx.new_output = false;
+			set_temperature(&ctx.outputs, temp, gamma);
 		}
 	}
 
