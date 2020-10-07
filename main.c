@@ -337,8 +337,7 @@ static void update_timer(struct context *ctx, timer_t timer, time_t now) {
 	} else if (now < ctx->dusk) {
 		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
 	} else {
-		deadline = ctx->dawn;
-		deadline = ((deadline / 86400 + 1) * 86400);
+		deadline = (ctx->dawn / 86400 + 1) * 86400;
 	}
 
 	assert(deadline > now);
