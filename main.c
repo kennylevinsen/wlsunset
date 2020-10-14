@@ -63,17 +63,17 @@ static int set_timer(timer_t timer, time_t deadline) {
 }
 #endif
 
-struct context {
+struct config {
 	int high_temp;
 	int low_temp;
 	int duration;
 	double longitude;
 	double latitude;
+};
 
-	time_t dawn;
-	time_t sunrise;
-	time_t sunset;
-	time_t dusk;
+struct context {
+	struct config config;
+	struct sun sun;
 
 	time_t dawn_step_time;
 	time_t dusk_step_time;
@@ -270,38 +270,41 @@ static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
 static int anim_kelvin_step = 25;
 
 static void recalc_stops(struct context *ctx, time_t now) {
-	time_t day = now - (now % 86400);
-	if (ctx->dusk == 0) {
-		// First calculation
-	} else if (now >= ctx->dusk) {
-		day += 86400;
-	} else if (day < ctx->dusk) {
+	if (now < ctx->sun.dusk) {
 		return;
 	}
 
-	struct tm tm = { 0 };
-	gmtime_r(&now, &tm);
-	sun(&tm, ctx->longitude, ctx->latitude, &ctx->dawn, &ctx->sunrise, &ctx->sunset, &ctx->dusk);
-	if (ctx->duration != -1) {
-		ctx->dawn = ctx->sunrise - ctx->duration;
-		ctx->dusk = ctx->sunset + ctx->duration;
+	time_t day = now - (now % 86400);
+	if (day < ctx->sun.dusk) {
+		day += 86400;
 	}
-	ctx->dawn += day;
-	ctx->sunrise += day;
-	ctx->sunset += day;
-	ctx->dusk += day;
 
-	int temp_diff = ctx->high_temp - ctx->low_temp;
-	ctx->dawn_step_time = (ctx->sunrise - ctx->dawn) * anim_kelvin_step / temp_diff;
-	ctx->dusk_step_time = (ctx->dusk - ctx->sunset) * anim_kelvin_step / temp_diff;
+	struct tm tm = { 0 };
+	gmtime_r(&day, &tm);
+	calc_sun(&tm, ctx->config.longitude, ctx->config.latitude, &ctx->sun);
+	if (ctx->config.duration != -1) {
+		ctx->sun.dawn = ctx->sun.sunrise - ctx->config.duration;
+		ctx->sun.dusk = ctx->sun.sunset + ctx->config.duration;
+	}
+
+	// TODO: Cap on eternal days?
+	ctx->sun.dawn += day;
+	ctx->sun.sunrise += day;
+	ctx->sun.sunset += day;
+	ctx->sun.dusk += day;
+	assert(ctx->sun.dusk > now);
+
+	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
+	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) * anim_kelvin_step / temp_diff;
+	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) * anim_kelvin_step / temp_diff;
 
 	struct tm dawn, sunrise, sunset, dusk;
-	localtime_r(&ctx->dawn, &dawn);
-	localtime_r(&ctx->sunrise, &sunrise);
-	localtime_r(&ctx->sunset, &sunset);
-	localtime_r(&ctx->dusk, &dusk);
+	localtime_r(&ctx->sun.dawn, &dawn);
+	localtime_r(&ctx->sun.sunrise, &sunrise);
+	localtime_r(&ctx->sun.sunset, &sunset);
+	localtime_r(&ctx->sun.dusk, &dusk);
 	fprintf(stderr, "calculated new sun trajectory: dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, dusk %02d:%02d\n",
-			dawn.tm_hour, dusk.tm_min,
+			dawn.tm_hour, dawn.tm_min,
 			sunrise.tm_hour, sunrise.tm_min,
 			sunset.tm_hour, sunset.tm_min,
 			dusk.tm_hour, dusk.tm_min);
@@ -314,31 +317,30 @@ static int interpolate_temperature(time_t now, time_t start, time_t stop, int te
 }
 
 static int get_temperature(const struct context *ctx, time_t now) {
-	if (now < ctx->dawn) {
-		return ctx->low_temp;
-	} else if (now < ctx->sunrise) {
-		return interpolate_temperature(now, ctx->dawn, ctx->sunrise, ctx->low_temp, ctx->high_temp);
-	} else if (now < ctx->sunset) {
-		return ctx->high_temp;
-	} else if (now < ctx->dusk) {
-		return interpolate_temperature(now, ctx->sunset, ctx->dusk, ctx->high_temp, ctx->low_temp);
+	if (now < ctx->sun.dawn) {
+		return ctx->config.low_temp;
+	} else if (now < ctx->sun.sunrise) {
+		return interpolate_temperature(now, ctx->sun.dawn, ctx->sun.sunrise, ctx->config.low_temp, ctx->config.high_temp);
+	} else if (now < ctx->sun.sunset) {
+		return ctx->config.high_temp;
+	} else if (now < ctx->sun.dusk) {
+		return interpolate_temperature(now, ctx->sun.sunset, ctx->sun.dusk, ctx->config.high_temp, ctx->config.low_temp);
 	} else {
-		return ctx->low_temp;
+		return ctx->config.low_temp;
 	}
 }
 
-
 static void update_timer(struct context *ctx, timer_t timer, time_t now) {
-	assert(now < ctx->dusk);
+	assert(now < ctx->sun.dusk);
 
 	time_t deadline;
-	if (now < ctx->dawn) {
-		deadline = ctx->dawn;
-	} else if (now < ctx->sunrise) {
+	if (now < ctx->sun.dawn) {
+		deadline = ctx->sun.dawn;
+	} else if (now < ctx->sun.sunrise) {
 		deadline = now + ctx->dawn_step_time;
-	} else if (now < ctx->sunset) {
-		deadline = ctx->sunset;
-	} else if (now < ctx->dusk) {
+	} else if (now < ctx->sun.sunset) {
+		deadline = ctx->sun.sunset;
+	} else if (now < ctx->sun.dusk) {
 		deadline = now + ctx->dusk_step_time;
 	}
 
@@ -413,9 +415,14 @@ int main(int argc, char *argv[]) {
 
 	// Initialize defaults
 	struct context ctx = {
-		.high_temp = 6500,
-		.low_temp = 4000,
-		.duration = -1,
+		.sun = { 0 },
+		.config = {
+			.high_temp = 6500,
+			.low_temp = 4000,
+			.duration = -1,
+			.latitude = 0,
+			.longitude = 0,
+		}
 	};
 	double gamma = 1.0;
 	wl_list_init(&ctx.outputs);
@@ -442,20 +449,20 @@ int main(int argc, char *argv[]) {
 	while ((opt = getopt(argc, argv, "hT:t:g:d:l:L:")) != -1) {
 		switch (opt) {
 			case 'T':
-				ctx.high_temp = strtol(optarg, NULL, 10);
+				ctx.config.high_temp = strtol(optarg, NULL, 10);
 				break;
 			case 't':
-				ctx.low_temp = strtol(optarg, NULL, 10);
+				ctx.config.low_temp = strtol(optarg, NULL, 10);
 				break;
 			case 'l':
-				ctx.latitude = strtod(optarg, NULL);
+				ctx.config.latitude = strtod(optarg, NULL);
 				break;
 			case 'L':
-				ctx.longitude = strtod(optarg, NULL);
+				ctx.config.longitude = strtod(optarg, NULL);
 				break;
 			case 'd':
 				fprintf(stderr, "using animation duration override\n");
-				ctx.duration = strtod(optarg, NULL) * 60;
+				ctx.config.duration = strtod(optarg, NULL) * 60;
 				break;
 			case 'g':
 				gamma = strtod(optarg, NULL);
@@ -467,9 +474,9 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (ctx.high_temp == ctx.low_temp) {
+	if (ctx.config.high_temp == ctx.config.low_temp) {
 		fprintf(stderr, "high (%d) and low (%d) temperature must not be identical\n",
-				ctx.high_temp, ctx.low_temp);
+				ctx.config.high_temp, ctx.config.low_temp);
 		return -1;
 	}
 

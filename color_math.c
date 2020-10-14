@@ -24,11 +24,9 @@ static double degrees(double radians) {
 	return radians * 180.0 / M_PI;
 }
 
-static void sun_angle(struct tm *tm, double longitude, double latitude, time_t *sunrise, time_t *sunset, double angle) {
+void calc_sun(struct tm *tm, double longitude, double latitude, struct sun *sun) {
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
-	double year_rad = 2 * M_PI /
-		days_in_year(tm->tm_year) *
-		(tm->tm_yday - 1 + (tm->tm_hour - 12)/24);
+	double year_rad = 2 * M_PI / days_in_year(tm->tm_year) * (tm->tm_yday - 1);
 	double eqtime = 229.18 * (0.000075 +
 		0.001868 * cos(year_rad) -
 		0.032077 * sin(year_rad) -
@@ -41,16 +39,16 @@ static void sun_angle(struct tm *tm, double longitude, double latitude, time_t *
 		0.000907 * sin(2*year_rad) -
 		0.002697 * cos(3*year_rad) +
 		0.00148 * sin(3*year_rad);
-	double ha = degrees(acos(
-		cos(radians(angle)) / (cos(radians(latitude)) * cos(decl)) -
+	double ha1 = degrees(acos(
+		cos(radians(SOLAR_HORIZON + SOLAR_START_TWILIGHT)) / (cos(radians(latitude)) * cos(decl)) -
 		tan(radians(latitude)) * tan(decl)));
-	*sunrise = (720 - 4 * (longitude + fabs(ha)) - eqtime) * 60;
-	*sunset = (720 - 4 * (longitude - fabs(ha)) - eqtime) * 60;
-}
-
-void sun(struct tm *tm, double longitude, double latitude, time_t *dawn, time_t *sunrise, time_t *sunset, time_t *dusk) {
-	sun_angle(tm, longitude, latitude, dawn, dusk, SOLAR_HORIZON + SOLAR_START_TWILIGHT);
-	sun_angle(tm, longitude, latitude, sunrise, sunset, SOLAR_HORIZON + SOLAR_END_TWILIGHT);
+	double ha2 = degrees(acos(
+		cos(radians(SOLAR_HORIZON + SOLAR_END_TWILIGHT)) / (cos(radians(latitude)) * cos(decl)) -
+		tan(radians(latitude)) * tan(decl)));
+	sun->dawn = (720 - 4 * (longitude + fabs(ha1)) - eqtime) * 60;
+	sun->sunrise = (720 - 4 * (longitude + fabs(ha2)) - eqtime) * 60;
+	sun->sunset = (720 - 4 * (longitude - fabs(ha2)) - eqtime) * 60;
+	sun->dusk = (720 - 4 * (longitude - fabs(ha1)) - eqtime) * 60;
 }
 
 static int illuminant_d(int temp, double *x, double *y) {
