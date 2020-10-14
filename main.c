@@ -63,8 +63,6 @@ static int set_timer(timer_t timer, time_t deadline) {
 }
 #endif
 
-static const int LONG_SLEEP = 600;
-
 struct context {
 	int high_temp;
 	int low_temp;
@@ -76,6 +74,9 @@ struct context {
 	time_t sunrise;
 	time_t sunset;
 	time_t dusk;
+
+	time_t dawn_step_time;
+	time_t dusk_step_time;
 
 	bool new_output;
 	struct wl_list outputs;
@@ -266,11 +267,13 @@ static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
 	}
 }
 
+static int anim_kelvin_step = 25;
+
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = now - (now % 86400);
 	if (ctx->dusk == 0) {
 		// First calculation
-	} else if (now > ctx->dusk) {
+	} else if (now >= ctx->dusk) {
 		day += 86400;
 	} else if (day < ctx->dusk) {
 		return;
@@ -287,6 +290,10 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	ctx->sunrise += day;
 	ctx->sunset += day;
 	ctx->dusk += day;
+
+	int temp_diff = ctx->high_temp - ctx->low_temp;
+	ctx->dawn_step_time = (ctx->sunrise - ctx->dawn) * anim_kelvin_step / temp_diff;
+	ctx->dusk_step_time = (ctx->dusk - ctx->sunset) * anim_kelvin_step / temp_diff;
 
 	struct tm dawn, sunrise, sunset, dusk;
 	localtime_r(&ctx->dawn, &dawn);
@@ -320,24 +327,19 @@ static int get_temperature(const struct context *ctx, time_t now) {
 	}
 }
 
-static int increments(int temp_diff, int duration) {
-	assert(temp_diff > 0);
-	int time = duration * 25 / temp_diff;
-	return time > LONG_SLEEP ? LONG_SLEEP : time;
-}
 
 static void update_timer(struct context *ctx, timer_t timer, time_t now) {
+	assert(now < ctx->dusk);
+
 	time_t deadline;
 	if (now < ctx->dawn) {
 		deadline = ctx->dawn;
 	} else if (now < ctx->sunrise) {
-		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->sunrise - ctx->dawn);
+		deadline = now + ctx->dawn_step_time;
 	} else if (now < ctx->sunset) {
 		deadline = ctx->sunset;
 	} else if (now < ctx->dusk) {
-		deadline = now + increments(ctx->high_temp - ctx->low_temp, ctx->dusk - ctx->sunset);
-	} else {
-		deadline = (ctx->dawn / 86400 + 1) * 86400;
+		deadline = now + ctx->dusk_step_time;
 	}
 
 	assert(deadline > now);
