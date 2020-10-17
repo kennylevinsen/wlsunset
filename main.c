@@ -17,49 +17,49 @@
 #include "color_math.h"
 
 #if defined(SPEEDRUN)
-static time_t start = 0;
-static void init_time(time_t *tloc) {
-	(void)tloc;
+static time_t start = 0, offset = 0, multiplier = 1000;
+static void init_time(void) {
 	tzset();
 	struct timespec realtime;
 	clock_gettime(CLOCK_REALTIME, &realtime);
-	start = realtime.tv_sec;
+	offset = realtime.tv_sec;
+
+	char *startstr = getenv("SPEEDRUN_START");
+	if (startstr != NULL) {
+		start = atol(startstr);
+	} else {
+		start = offset;
+	}
+
+	char *multistr = getenv("SPEEDRUN_MULTIPLIER");
+	if (multistr != NULL) {
+		multiplier = atol(multistr);
+	}
 }
-static time_t get_time_sec(time_t *tloc) {
-	(void)tloc;
+static time_t get_time_sec(void) {
 	struct timespec realtime;
 	clock_gettime(CLOCK_REALTIME, &realtime);
-	time_t now = start + ((realtime.tv_sec - start) * 1000 + realtime.tv_nsec / 1000000);
-
+	time_t now = start + ((realtime.tv_sec - offset) * multiplier + realtime.tv_nsec / (1000000000 / multiplier));
 	struct tm tm;
 	localtime_r(&now, &tm);
-	fprintf(stderr, "time in termina: %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
+	fprintf(stderr, "time in termina: %02d:%02d:%02d, %d/%d/%d\n", tm.tm_hour, tm.tm_min, tm.tm_sec,
+			tm.tm_mday, tm.tm_mon+1, tm.tm_year + 1900);
 	return now;
 }
-static int set_timer(timer_t timer, time_t deadline) {
-	time_t diff = deadline - start;
-	struct itimerspec timerspec = {{0}, {0}};
-	timerspec.it_value.tv_sec = start + diff / 1000;
-	timerspec.it_value.tv_nsec = (diff % 1000) * 1000000;
-
-	struct tm tm;
-	localtime_r(&deadline, &tm);
-	fprintf(stderr, "sleeping until %02d:%02d:%02d\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
-
-	return timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
+static void adjust_timerspec(struct itimerspec *timerspec) {
+	int diff = timerspec->it_value.tv_sec - offset;
+	timerspec->it_value.tv_sec = offset + diff / multiplier;
+	timerspec->it_value.tv_nsec = (diff % multiplier) * (1000000000 / multiplier);
 }
 #else
-static inline void init_time(time_t *tloc) {
-	(void)tloc;
+static inline void init_time(void) {
 	tzset();
 }
-static inline time_t get_time_sec(time_t *tloc) {
-	return time(tloc);
+static inline time_t get_time_sec(void) {
+	return time(NULL);
 }
-static int set_timer(timer_t timer, time_t deadline) {
-	struct itimerspec timerspec = {{0}, {0}};
-	timerspec.it_value.tv_sec = deadline;
-	return timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
+static inline void adjust_timerspec(struct itimerspec *timerspec) {
+	(void)timerspec;
 }
 #endif
 
@@ -486,7 +486,15 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	}
 
 	assert(deadline > now);
-	set_timer(timer, deadline);
+	struct itimerspec timerspec = {
+		.it_interval = {0},
+		.it_value = {
+			.tv_sec = deadline,
+			.tv_nsec = 0,
+		}
+	};
+	adjust_timerspec(&timerspec);
+	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
 }
 
 static int display_poll(struct wl_display *display, short int events, int timeout) {
@@ -552,7 +560,7 @@ static void timer_signal(int signal) {
 
 int main(int argc, char *argv[]) {
 
-	init_time(NULL);
+	init_time();
 
 	// Initialize defaults
 	struct context ctx = {
@@ -646,7 +654,7 @@ int main(int argc, char *argv[]) {
 	wl_display_roundtrip(display);
 
 
-	time_t now = get_time_sec(NULL);
+	time_t now = get_time_sec();
 	recalc_stops(&ctx, now);
 	update_timer(&ctx, ctx.timer, now);
 
@@ -658,7 +666,7 @@ int main(int argc, char *argv[]) {
 		if (timer_fired) {
 			timer_fired = false;
 
-			now = get_time_sec(NULL);
+			now = get_time_sec();
 			recalc_stops(&ctx, now);
 			update_timer(&ctx, ctx.timer, now);
 
