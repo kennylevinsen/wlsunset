@@ -66,9 +66,12 @@ static inline void adjust_timerspec(struct itimerspec *timerspec) {
 struct config {
 	int high_temp;
 	int low_temp;
-	int duration;
+	double gamma;
+
 	double longitude;
 	double latitude;
+
+	int duration;
 };
 
 enum state {
@@ -547,15 +550,6 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 	return wl_display_dispatch_pending(display);
 }
 
-static const char usage[] = "usage: %s [options]\n"
-"  -h            show this help message\n"
-"  -T <temp>     set high temperature (default: 6500)\n"
-"  -t <temp>     set low temperature (default: 4000)\n"
-"  -l <lat>      set latitude (e.g. 39.9)\n"
-"  -L <long>     set longitude (e.g. 116.3)\n"
-"  -d <minutes>  set ramping duration in minutes (default: 60)\n"
-"  -g <gamma>    set gamma (default: 1.0)\n";
-
 static int timer_fired = 0;
 
 static void timer_signal(int signal) {
@@ -563,8 +557,24 @@ static void timer_signal(int signal) {
 	timer_fired = true;
 }
 
-int main(int argc, char *argv[]) {
+static int setup_timer(struct context *ctx) {
+	struct sigaction timer_action = {
+		.sa_handler = timer_signal,
+		.sa_flags = 0,
+	};
+	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
+		fprintf(stderr, "could not configure alarm handler: %s\n", strerror(errno));
+		return -1;
+	}
 
+	if (timer_create(CLOCK_REALTIME, NULL, &ctx->timer) == -1) {
+		fprintf(stderr, "could not configure timer: %s\n", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+static int wlrun(struct config cfg) {
 	init_time();
 
 	// Initialize defaults
@@ -572,74 +582,18 @@ int main(int argc, char *argv[]) {
 		.sun = { 0 },
 		.condition = SUN_CONDITION_LAST,
 		.state = STATE_INITIAL,
-		.config = {
-			.high_temp = 6500,
-			.low_temp = 4000,
-			.duration = -1,
-			.latitude = 0,
-			.longitude = 0,
-		}
+		.config = cfg,
 	};
-	double gamma = 1.0;
 	wl_list_init(&ctx.outputs);
 
-	struct sigaction timer_action = {
-		.sa_handler = timer_signal,
-		.sa_flags = 0,
-	};
-	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
-		fprintf(stderr, "could not configure alarm handler: %s\n", strerror(errno));
-		return 1;
-	}
-
-	if (timer_create(CLOCK_REALTIME, NULL, &ctx.timer) == -1) {
-		fprintf(stderr, "could not configure timer: %s\n", strerror(errno));
-		return 1;
-	}
-
-#ifdef SPEEDRUN
-	fprintf(stderr, "warning: speedrun mode enabled\n");
-#endif
-
-	int opt;
-	while ((opt = getopt(argc, argv, "hT:t:g:d:l:L:")) != -1) {
-		switch (opt) {
-			case 'T':
-				ctx.config.high_temp = strtol(optarg, NULL, 10);
-				break;
-			case 't':
-				ctx.config.low_temp = strtol(optarg, NULL, 10);
-				break;
-			case 'l':
-				ctx.config.latitude = RADIANS(strtod(optarg, NULL));
-				break;
-			case 'L':
-				ctx.config.longitude = RADIANS(strtod(optarg, NULL));
-				break;
-			case 'd':
-				fprintf(stderr, "using animation duration override\n");
-				ctx.config.duration = strtod(optarg, NULL) * 60;
-				break;
-			case 'g':
-				gamma = strtod(optarg, NULL);
-				break;
-			case 'h':
-			default:
-				fprintf(stderr, usage, argv[0]);
-				return opt == 'h' ? EXIT_SUCCESS : EXIT_FAILURE;
-		}
-	}
-
-	if (ctx.config.high_temp == ctx.config.low_temp) {
-		fprintf(stderr, "high (%d) and low (%d) temperature must not be identical\n",
-				ctx.config.high_temp, ctx.config.low_temp);
-		return -1;
+	if (setup_timer(&ctx) == -1) {
+		return EXIT_FAILURE;
 	}
 
 	struct wl_display *display = wl_display_connect(NULL);
 	if (display == NULL) {
 		fprintf(stderr, "failed to create display\n");
-		return -1;
+		return EXIT_FAILURE;
 	}
 
 	struct wl_registry *registry = wl_display_get_registry(display);
@@ -658,13 +612,12 @@ int main(int argc, char *argv[]) {
 	}
 	wl_display_roundtrip(display);
 
-
 	time_t now = get_time_sec();
 	recalc_stops(&ctx, now);
 	update_timer(&ctx, ctx.timer, now);
 
 	int temp = get_temperature(&ctx, now);
-	set_temperature(&ctx.outputs, temp, gamma);
+	set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 
 	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {
@@ -678,13 +631,86 @@ int main(int argc, char *argv[]) {
 			if ((temp = get_temperature(&ctx, now)) != old_temp) {
 				old_temp = temp;
 				ctx.new_output = false;
-				set_temperature(&ctx.outputs, temp, gamma);
+				set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 			}
 		} else if (ctx.new_output) {
 			ctx.new_output = false;
-			set_temperature(&ctx.outputs, temp, gamma);
+			set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 		}
 	}
 
 	return EXIT_SUCCESS;
+}
+
+static const char usage[] = "usage: %s [options]\n"
+"  -h            show this help message\n"
+"  -T <temp>     set high temperature (default: 6500)\n"
+"  -t <temp>     set low temperature (default: 4000)\n"
+"  -l <lat>      set latitude (e.g. 39.9)\n"
+"  -L <long>     set longitude (e.g. 116.3)\n"
+"  -s <start>    set manual start time (e.g. 06:30)\n"
+"  -S <stop>     set manual stop time (e.g. 19:30)\n"
+"  -d <minutes>  set manual ramping duration in minutes (default: 60)\n"
+"  -g <gamma>    set gamma (default: 1.0)\n";
+
+int main(int argc, char *argv[]) {
+#ifdef SPEEDRUN
+	fprintf(stderr, "warning: speedrun mode enabled\n");
+#endif
+
+	struct config config = {
+		.latitude = 0,
+		.longitude = 0,
+		.high_temp = 6500,
+		.low_temp = 4000,
+		.gamma = 1.0,
+		.duration = -1,
+	};
+
+	int opt;
+	while ((opt = getopt(argc, argv, "ht:T:l:L:d:g:")) != -1) {
+		switch (opt) {
+			case 'T':
+				config.high_temp = strtol(optarg, NULL, 10);
+				break;
+			case 't':
+				config.low_temp = strtol(optarg, NULL, 10);
+				break;
+			case 'l':
+				config.latitude = strtod(optarg, NULL);
+				break;
+			case 'L':
+				config.longitude = strtod(optarg, NULL);
+				break;
+			case 'd':
+				fprintf(stderr, "using animation duration override\n");
+				config.duration = strtod(optarg, NULL) * 60;
+				break;
+			case 'g':
+				config.gamma = strtod(optarg, NULL);
+				break;
+			case 'h':
+			default:
+				fprintf(stderr, usage, argv[0]);
+				return opt == 'h' ? EXIT_SUCCESS : EXIT_FAILURE;
+		}
+	}
+
+	if (config.high_temp <= config.low_temp) {
+		fprintf(stderr, "high temp (%d) must be higher than low (%d) temp\n",
+				config.high_temp, config.low_temp);
+		return -1;
+	}
+	if (config.latitude > 90.0 || config.latitude < -90.0) {
+		fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n", config.latitude);
+		return EXIT_FAILURE;
+	}
+	config.latitude = RADIANS(config.latitude);
+	if (config.longitude > 180.0 || config.longitude < -180.0) {
+		fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n", config.longitude);
+		return EXIT_FAILURE;
+	}
+	config.longitude = RADIANS(config.longitude);
+
+	return wlrun(config);
 }
