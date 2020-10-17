@@ -397,7 +397,12 @@ static int interpolate_temperature(time_t now, time_t start, time_t stop, int te
 	if (start == stop) {
 		return stop;
 	}
-	double time_pos = clamp((double)(now - start) / (double)(stop - start));
+	double time_pos = (double)(now - start) / (double)(stop - start);
+	if (time_pos > 1.0) {
+		time_pos = 1.0;
+	} else if (time_pos < 0.0) {
+		time_pos = 0.0;
+	}
 	int temp_pos = (double)(temp_stop - temp_start) * time_pos;
 	return temp_start + temp_pos;
 }

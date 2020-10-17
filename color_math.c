@@ -133,7 +133,7 @@ static double srgb_gamma(double value, double gamma) {
 	}
 }
 
-double clamp(double value) {
+static double clamp(double value) {
 	if (value > 1.0) {
 		return 1.0;
 	} else if (value < 0.0) {
