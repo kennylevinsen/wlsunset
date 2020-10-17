@@ -71,12 +71,23 @@ struct config {
 	double latitude;
 };
 
+enum state {
+	STATE_INITIAL,
+	STATE_NORMAL,
+	STATE_TRANSITION,
+	STATE_STATIC,
+};
+
 struct context {
 	struct config config;
 	struct sun sun;
 
+	enum state state;
+	enum sun_condition condition;
+
 	time_t dawn_step_time;
 	time_t dusk_step_time;
+	time_t calc_day;
 
 	bool new_output;
 	struct wl_list outputs;
@@ -95,6 +106,14 @@ struct output {
 	uint32_t ramp_size;
 	uint16_t *table;
 };
+
+static time_t round_day(time_t now) {
+	return now - (now % 86400);
+}
+
+static time_t tomorrow(time_t now) {
+	return round_day(now) + 86400;
+}
 
 static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
 
@@ -267,56 +286,123 @@ static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
 	}
 }
 
+static const char *sun_condition_str[] = {
+	"normal",
+	"midnight sun",
+	"polar night",
+	"invalid",
+	NULL,
+};
+
+static void print_trajectory(struct context *ctx, time_t day) {
+	fprintf(stderr, "calculated sun trajectory:");
+
+	struct tm tm;
+	if (ctx->sun.dawn >= day) {
+		localtime_r(&ctx->sun.dawn, &tm);
+		fprintf(stderr, " dawn %02d:%02d,", tm.tm_hour, tm.tm_min);
+	} else {
+		fprintf(stderr, " dawn N/A,");
+	}
+
+	if (ctx->sun.sunrise >= day) {
+		localtime_r(&ctx->sun.sunrise, &tm);
+		fprintf(stderr, " sunrise %02d:%02d,", tm.tm_hour, tm.tm_min);
+	} else {
+		fprintf(stderr, " sunrise N/A,");
+	}
+
+	if (ctx->sun.sunset >= day) {
+		localtime_r(&ctx->sun.sunset, &tm);
+		fprintf(stderr, " sunset %02d:%02d,", tm.tm_hour, tm.tm_min);
+	} else {
+		fprintf(stderr, " sunset N/A,");
+	}
+
+	if (ctx->sun.dusk >= day) {
+		localtime_r(&ctx->sun.dusk, &tm);
+		fprintf(stderr, " dusk %02d:%02d,", tm.tm_hour, tm.tm_min);
+	} else {
+		fprintf(stderr, " dusk N/A,");
+	}
+
+	fprintf(stderr, " condition: %s\n", sun_condition_str[ctx->condition]);
+}
+
 static int anim_kelvin_step = 25;
 
 static void recalc_stops(struct context *ctx, time_t now) {
-	if (now < ctx->sun.dusk) {
+	time_t day = round_day(now);
+	time_t last_day = ctx->calc_day;
+	if (day == last_day) {
 		return;
 	}
+	ctx->calc_day = day;
 
-	time_t day = now - (now % 86400);
-	if (day < ctx->sun.dusk) {
-		day += 86400;
-	}
-
+	struct sun sun;
 	struct tm tm = { 0 };
 	gmtime_r(&day, &tm);
-	calc_sun(&tm, ctx->config.longitude, ctx->config.latitude, &ctx->sun);
-	if (ctx->config.duration != -1) {
-		ctx->sun.dawn = ctx->sun.sunrise - ctx->config.duration;
-		ctx->sun.dusk = ctx->sun.sunset + ctx->config.duration;
-	}
+	enum sun_condition cond = calc_sun(&tm, ctx->config.longitude, ctx->config.latitude, &sun);
 
-	// TODO: Cap on eternal days?
-	ctx->sun.dawn += day;
-	ctx->sun.sunrise += day;
-	ctx->sun.sunset += day;
-	ctx->sun.dusk += day;
-	assert(ctx->sun.dusk > now);
+	switch (cond) {
+	case NORMAL:
+		if (ctx->condition == MIDNIGHT_SUN) {
+			// Yesterday had no sunset, so remove our sunrise.
+			sun.dawn = -1;
+			sun.sunrise = -1;
+		}
+		ctx->state = STATE_NORMAL;
+		break;
+	case MIDNIGHT_SUN:
+		if (ctx->condition == POLAR_NIGHT) {
+			fprintf(stderr, "warning: direct polar night to midnight sun transition\n");
+		}
+
+		if (ctx->state != STATE_NORMAL) {
+			ctx->state = STATE_STATIC;
+			break;
+		}
+
+		// Borrow yesterday's sunrise to animate into the midnight sun
+		sun.dawn = sun.dawn != -1 ? sun.dawn :
+			ctx->sun.dawn - last_day;
+		sun.sunrise = sun.sunrise != -1 ? sun.sunrise :
+			ctx->sun.sunrise - last_day;
+		ctx->state = STATE_TRANSITION;
+		break;
+	case POLAR_NIGHT:
+		if (ctx->condition == MIDNIGHT_SUN) {
+			fprintf(stderr, "warning: direct midnight sun to polar night transition\n");
+		}
+		ctx->state = STATE_STATIC;
+		break;
+	default:
+		abort();
+	}
+	ctx->condition = cond;
+
+	ctx->sun.dawn = sun.dawn + day;
+	ctx->sun.sunrise = sun.sunrise + day;
+	ctx->sun.sunset = sun.sunset + day;
+	ctx->sun.dusk = sun.dusk + day;
 
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
 	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) * anim_kelvin_step / temp_diff;
 	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) * anim_kelvin_step / temp_diff;
 
-	struct tm dawn, sunrise, sunset, dusk;
-	localtime_r(&ctx->sun.dawn, &dawn);
-	localtime_r(&ctx->sun.sunrise, &sunrise);
-	localtime_r(&ctx->sun.sunset, &sunset);
-	localtime_r(&ctx->sun.dusk, &dusk);
-	fprintf(stderr, "calculated new sun trajectory: dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, dusk %02d:%02d\n",
-			dawn.tm_hour, dawn.tm_min,
-			sunrise.tm_hour, sunrise.tm_min,
-			sunset.tm_hour, sunset.tm_min,
-			dusk.tm_hour, dusk.tm_min);
+	print_trajectory(ctx, day);
 }
 
 static int interpolate_temperature(time_t now, time_t start, time_t stop, int temp_start, int temp_stop) {
+	if (start == stop) {
+		return stop;
+	}
 	double time_pos = clamp((double)(now - start) / (double)(stop - start));
 	int temp_pos = (double)(temp_stop - temp_start) * time_pos;
 	return temp_start + temp_pos;
 }
 
-static int get_temperature(const struct context *ctx, time_t now) {
+static int get_temperature_normal(const struct context *ctx, time_t now) {
 	if (now < ctx->sun.dawn) {
 		return ctx->config.low_temp;
 	} else if (now < ctx->sun.sunrise) {
@@ -330,18 +416,73 @@ static int get_temperature(const struct context *ctx, time_t now) {
 	}
 }
 
-static void update_timer(struct context *ctx, timer_t timer, time_t now) {
-	assert(now < ctx->sun.dusk);
+static int get_temperature_transition(const struct context *ctx, time_t now) {
+	switch (ctx->condition) {
+	case MIDNIGHT_SUN:
+		if (now < ctx->sun.sunrise) {
+			return get_temperature_normal(ctx, now);
+		}
+		return ctx->config.high_temp;
+	default:
+		abort();
+	}
+}
 
-	time_t deadline;
+static int get_temperature(const struct context *ctx, time_t now) {
+	switch (ctx->state) {
+	case STATE_NORMAL:
+		return get_temperature_normal(ctx, now);
+	case STATE_TRANSITION:
+		return get_temperature_transition(ctx, now);
+	case STATE_STATIC:
+		return ctx->condition == MIDNIGHT_SUN ? ctx->config.high_temp : ctx->config.low_temp;
+	default:
+		abort();
+	}
+}
+
+static time_t get_deadline_normal(const struct context *ctx, time_t now) {
 	if (now < ctx->sun.dawn) {
-		deadline = ctx->sun.dawn;
+		return ctx->sun.dawn;
 	} else if (now < ctx->sun.sunrise) {
-		deadline = now + ctx->dawn_step_time;
+		return now + ctx->dawn_step_time;
 	} else if (now < ctx->sun.sunset) {
-		deadline = ctx->sun.sunset;
+		return ctx->sun.sunset;
 	} else if (now < ctx->sun.dusk) {
-		deadline = now + ctx->dusk_step_time;
+		return now + ctx->dusk_step_time;
+	} else {
+		return tomorrow(now);
+	}
+}
+
+static time_t get_deadline_transition(const struct context *ctx, time_t now) {
+	switch (ctx->condition) {
+	case MIDNIGHT_SUN:
+		if (now < ctx->sun.sunrise) {
+			return get_deadline_normal(ctx, now);
+		}
+		// fallthrough
+	case POLAR_NIGHT:
+		return tomorrow(now);
+	default:
+		abort();
+	}
+}
+
+static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
+	time_t deadline;
+	switch (ctx->state) {
+	case STATE_NORMAL:
+		deadline = get_deadline_normal(ctx, now);
+		break;
+	case STATE_TRANSITION:
+		deadline = get_deadline_transition(ctx, now);
+		break;
+	case STATE_STATIC:
+		deadline = tomorrow(now);
+		break;
+	default:
+		abort();
 	}
 
 	assert(deadline > now);
@@ -416,6 +557,8 @@ int main(int argc, char *argv[]) {
 	// Initialize defaults
 	struct context ctx = {
 		.sun = { 0 },
+		.condition = SUN_CONDITION_LAST,
+		.state = STATE_INITIAL,
 		.config = {
 			.high_temp = 6500,
 			.low_temp = 4000,
@@ -455,10 +598,10 @@ int main(int argc, char *argv[]) {
 				ctx.config.low_temp = strtol(optarg, NULL, 10);
 				break;
 			case 'l':
-				ctx.config.latitude = strtod(optarg, NULL);
+				ctx.config.latitude = RADIANS(strtod(optarg, NULL));
 				break;
 			case 'L':
-				ctx.config.longitude = strtod(optarg, NULL);
+				ctx.config.longitude = RADIANS(strtod(optarg, NULL));
 				break;
 			case 'd':
 				fprintf(stderr, "using animation duration override\n");
@@ -505,10 +648,10 @@ int main(int argc, char *argv[]) {
 
 	time_t now = get_time_sec(NULL);
 	recalc_stops(&ctx, now);
+	update_timer(&ctx, ctx.timer, now);
 
 	int temp = get_temperature(&ctx, now);
 	set_temperature(&ctx.outputs, temp, gamma);
-	update_timer(&ctx, ctx.timer, now);
 
 	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {

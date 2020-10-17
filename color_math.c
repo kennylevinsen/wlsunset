@@ -4,51 +4,71 @@
 #include <time.h>
 #include "color_math.h"
 
-#define SOLAR_HORIZON		90.833
-#define SOLAR_START_TWILIGHT	6.0
-#define SOLAR_END_TWILIGHT	-3.0
-
-static int is_leap(int year) {
-	return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-}
+static double SOLAR_START_TWILIGHT = RADIANS(90.833 + 6.0);
+static double SOLAR_END_TWILIGHT   = RADIANS(90.833 - 3.0);
 
 static int days_in_year(int year) {
-	return is_leap(year) ? 366 : 365;
+	int leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+	return leap ? 366 : 365;
 }
 
-static double radians(double degrees) {
-	return degrees * M_PI / 180.0;
+static double date_orbit_angle(struct tm *tm) {
+	return 2 * M_PI / (double)days_in_year(tm->tm_year + 1900) * tm->tm_yday;
 }
 
-static double degrees(double radians) {
-	return radians * 180.0 / M_PI;
-}
-
-void calc_sun(struct tm *tm, double longitude, double latitude, struct sun *sun) {
+static double equation_of_time(double orbit_angle) {
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
-	double year_rad = 2 * M_PI / days_in_year(tm->tm_year) * (tm->tm_yday - 1);
-	double eqtime = 229.18 * (0.000075 +
-		0.001868 * cos(year_rad) -
-		0.032077 * sin(year_rad) -
-		0.014615 * cos(2*year_rad) -
-		0.040849 * sin(2*year_rad));
-	double decl = 0.006918 -
-		0.399912 * cos(year_rad) +
-		0.070257 * sin(year_rad) -
-		0.006758 * cos(2*year_rad) +
-		0.000907 * sin(2*year_rad) -
-		0.002697 * cos(3*year_rad) +
-		0.00148 * sin(3*year_rad);
-	double ha1 = degrees(acos(
-		cos(radians(SOLAR_HORIZON + SOLAR_START_TWILIGHT)) / (cos(radians(latitude)) * cos(decl)) -
-		tan(radians(latitude)) * tan(decl)));
-	double ha2 = degrees(acos(
-		cos(radians(SOLAR_HORIZON + SOLAR_END_TWILIGHT)) / (cos(radians(latitude)) * cos(decl)) -
-		tan(radians(latitude)) * tan(decl)));
-	sun->dawn = (720 - 4 * (longitude + fabs(ha1)) - eqtime) * 60;
-	sun->sunrise = (720 - 4 * (longitude + fabs(ha2)) - eqtime) * 60;
-	sun->sunset = (720 - 4 * (longitude - fabs(ha2)) - eqtime) * 60;
-	sun->dusk = (720 - 4 * (longitude - fabs(ha1)) - eqtime) * 60;
+	return 4 * (0.000075 +
+		0.001868 * cos(orbit_angle) -
+		0.032077 * sin(orbit_angle) -
+		0.014615 * cos(2*orbit_angle) -
+		0.040849 * sin(2*orbit_angle));
+}
+
+static double sun_declination(double orbit_angle) {
+	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
+	return 0.006918 -
+		0.399912 * cos(orbit_angle) +
+		0.070257 * sin(orbit_angle) -
+		0.006758 * cos(2*orbit_angle) +
+		0.000907 * sin(2*orbit_angle) -
+		0.002697 * cos(3*orbit_angle) +
+		0.00148 * sin(3*orbit_angle);
+}
+
+static double sun_hour_angle(double latitude, double declination, double target_sun) {
+	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
+	return acos(cos(target_sun) /
+		cos(latitude) * cos(declination) -
+		tan(latitude) * tan(declination));
+}
+
+static time_t hour_angle_to_time(double longitude, double eqtime, double hour_angle) {
+	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
+	return isnan(hour_angle) ? -1 :
+		DEGREES((4.0 * M_PI - 4 * (longitude + hour_angle) - eqtime) * 60);
+}
+
+static enum sun_condition condition(double latitude_rad, double sun_declination) {
+	int sign_lat = signbit(latitude_rad) == 0;
+	int sign_decl = signbit(sun_declination) == 0;
+	return sign_lat == sign_decl ? MIDNIGHT_SUN : POLAR_NIGHT;
+}
+
+enum sun_condition calc_sun(struct tm *tm, double longitude, double latitude, struct sun *sun) {
+	double orbit_angle = date_orbit_angle(tm);
+	double decl = sun_declination(orbit_angle);
+	double eqtime = equation_of_time(orbit_angle);
+
+	double ha_twilight = sun_hour_angle(latitude, decl, SOLAR_START_TWILIGHT);
+	double ha_daylight = sun_hour_angle(latitude, decl, SOLAR_END_TWILIGHT);
+
+	sun->dawn = hour_angle_to_time(longitude, eqtime, fabs(ha_twilight));
+	sun->dusk = hour_angle_to_time(longitude, eqtime, -fabs(ha_twilight));
+	sun->sunrise = hour_angle_to_time(longitude, eqtime, fabs(ha_daylight));
+	sun->sunset = hour_angle_to_time(longitude, eqtime, -fabs(ha_daylight));
+
+	return isnan(ha_twilight) || isnan(ha_daylight) ? condition(latitude, decl) : NORMAL;
 }
 
 static int illuminant_d(int temp, double *x, double *y) {
