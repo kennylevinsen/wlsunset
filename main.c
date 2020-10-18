@@ -64,6 +64,14 @@ static inline void adjust_timerspec(struct itimerspec *timerspec) {
 }
 #endif
 
+static time_t round_day(time_t now) {
+	return now - (now % 86400);
+}
+
+static time_t tomorrow(time_t now) {
+	return round_day(now) + 86400;
+}
+
 struct config {
 	int high_temp;
 	int low_temp;
@@ -110,185 +118,6 @@ struct output {
 	uint32_t ramp_size;
 	uint16_t *table;
 };
-
-static time_t round_day(time_t now) {
-	return now - (now % 86400);
-}
-
-static time_t tomorrow(time_t now) {
-	return round_day(now) + 86400;
-}
-
-static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
-
-static int create_anonymous_file(off_t size) {
-	char template[] = "/tmp/wlsunset-shared-XXXXXX";
-	int fd = mkstemp(template);
-	if (fd < 0) {
-		return -1;
-	}
-
-	int ret;
-	do {
-		errno = 0;
-		ret = ftruncate(fd, size);
-	} while (errno == EINTR);
-	if (ret < 0) {
-		close(fd);
-		return -1;
-	}
-
-	unlink(template);
-	return fd;
-}
-
-static int create_gamma_table(uint32_t ramp_size, uint16_t **table) {
-	size_t table_size = ramp_size * 3 * sizeof(uint16_t);
-	int fd = create_anonymous_file(table_size);
-	if (fd < 0) {
-		fprintf(stderr, "failed to create anonymous file\n");
-		return -1;
-	}
-
-	void *data =
-		mmap(NULL, table_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
-		fprintf(stderr, "failed to mmap()\n");
-		close(fd);
-		return -1;
-	}
-
-	*table = data;
-	return fd;
-}
-
-static void gamma_control_handle_gamma_size(void *data,
-		struct zwlr_gamma_control_v1 *gamma_control, uint32_t ramp_size) {
-	(void)gamma_control;
-	struct output *output = data;
-	output->ramp_size = ramp_size;
-	if (output->table_fd != -1) {
-		close(output->table_fd);
-	}
-	output->table_fd = create_gamma_table(ramp_size, &output->table);
-	output->context->new_output = true;
-	if (output->table_fd < 0) {
-		fprintf(stderr, "could not create gamma table for output %d\n",
-				output->id);
-		exit(EXIT_FAILURE);
-	}
-}
-
-static void gamma_control_handle_failed(void *data,
-		struct zwlr_gamma_control_v1 *gamma_control) {
-	(void)gamma_control;
-	struct output *output = data;
-	fprintf(stderr, "gamma control of output %d failed\n",
-			output->id);
-	zwlr_gamma_control_v1_destroy(output->gamma_control);
-	output->gamma_control = NULL;
-	if (output->table_fd != -1) {
-		close(output->table_fd);
-		output->table_fd = -1;
-	}
-}
-
-static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
-	.gamma_size = gamma_control_handle_gamma_size,
-	.failed = gamma_control_handle_failed,
-};
-
-static void setup_output(struct output *output) {
-	if (output->gamma_control != NULL) {
-		return;
-	}
-	if (gamma_control_manager == NULL) {
-		fprintf(stderr, "skipping setup of output %d: gamma_control_manager missing\n",
-				output->id);
-		return;
-	}
-	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
-		gamma_control_manager, output->wl_output);
-	zwlr_gamma_control_v1_add_listener(output->gamma_control,
-		&gamma_control_listener, output);
-}
-
-static void registry_handle_global(void *data, struct wl_registry *registry,
-		uint32_t name, const char *interface, uint32_t version) {
-	(void)version;
-	struct context *ctx = (struct context *)data;
-	if (strcmp(interface, wl_output_interface.name) == 0) {
-		fprintf(stderr, "registry: adding output %d\n", name);
-		struct output *output = calloc(1, sizeof(struct output));
-		output->id = name;
-		output->wl_output = wl_registry_bind(registry, name,
-				&wl_output_interface, 1);
-		output->table_fd = -1;
-		output->context = ctx;
-		wl_list_insert(&ctx->outputs, &output->link);
-		setup_output(output);
-	} else if (strcmp(interface,
-				zwlr_gamma_control_manager_v1_interface.name) == 0) {
-		gamma_control_manager = wl_registry_bind(registry, name,
-				&zwlr_gamma_control_manager_v1_interface, 1);
-	}
-}
-
-static void registry_handle_global_remove(void *data,
-		struct wl_registry *registry, uint32_t name) {
-	(void)registry;
-	struct context *ctx = (struct context *)data;
-	struct output *output, *tmp;
-	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
-		if (output->id == name) {
-			fprintf(stderr, "registry: removing output %d\n", name);
-			wl_list_remove(&output->link);
-			if (output->gamma_control != NULL) {
-				zwlr_gamma_control_v1_destroy(output->gamma_control);
-			}
-			if (output->table_fd != -1) {
-				close(output->table_fd);
-			}
-			free(output);
-			break;
-		}
-	}
-}
-
-static const struct wl_registry_listener registry_listener = {
-	.global = registry_handle_global,
-	.global_remove = registry_handle_global_remove,
-};
-
-static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, double gw, double bw, double gamma) {
-	uint16_t *r = table;
-	uint16_t *g = table + ramp_size;
-	uint16_t *b = table + 2 * ramp_size;
-	for (uint32_t i = 0; i < ramp_size; ++i) {
-		double val = (double)i / (ramp_size - 1);
-		r[i] = (uint16_t)(UINT16_MAX * pow(val * rw, 1.0 / gamma));
-		g[i] = (uint16_t)(UINT16_MAX * pow(val * gw, 1.0 / gamma));
-		b[i] = (uint16_t)(UINT16_MAX * pow(val * bw, 1.0 / gamma));
-	}
-}
-
-static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
-	double rw, gw, bw;
-	calc_whitepoint(temp, &rw, &gw, &bw);
-	fprintf(stderr, "setting temperature to %d K\n", temp);
-
-	struct output *output;
-	wl_list_for_each(output, outputs, link) {
-		if (output->gamma_control == NULL || output->table_fd == -1) {
-			continue;
-		}
-		fill_gamma_table(output->table, output->ramp_size,
-				rw, gw, bw, gamma);
-		lseek(output->table_fd, 0, SEEK_SET);
-		zwlr_gamma_control_v1_set_gamma(output->gamma_control,
-				output->table_fd);
-	}
-}
 
 static void print_trajectory(struct context *ctx) {
 	fprintf(stderr, "calculated sun trajectory: ");
@@ -487,6 +316,177 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	};
 	adjust_timerspec(&timerspec);
 	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
+}
+
+static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
+
+static int create_anonymous_file(off_t size) {
+	char template[] = "/tmp/wlsunset-shared-XXXXXX";
+	int fd = mkstemp(template);
+	if (fd < 0) {
+		return -1;
+	}
+
+	int ret;
+	do {
+		errno = 0;
+		ret = ftruncate(fd, size);
+	} while (errno == EINTR);
+	if (ret < 0) {
+		close(fd);
+		return -1;
+	}
+
+	unlink(template);
+	return fd;
+}
+
+static int create_gamma_table(uint32_t ramp_size, uint16_t **table) {
+	size_t table_size = ramp_size * 3 * sizeof(uint16_t);
+	int fd = create_anonymous_file(table_size);
+	if (fd < 0) {
+		fprintf(stderr, "failed to create anonymous file\n");
+		return -1;
+	}
+
+	void *data =
+		mmap(NULL, table_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (data == MAP_FAILED) {
+		fprintf(stderr, "failed to mmap()\n");
+		close(fd);
+		return -1;
+	}
+
+	*table = data;
+	return fd;
+}
+
+static void gamma_control_handle_gamma_size(void *data,
+		struct zwlr_gamma_control_v1 *gamma_control, uint32_t ramp_size) {
+	(void)gamma_control;
+	struct output *output = data;
+	output->ramp_size = ramp_size;
+	if (output->table_fd != -1) {
+		close(output->table_fd);
+	}
+	output->table_fd = create_gamma_table(ramp_size, &output->table);
+	output->context->new_output = true;
+	if (output->table_fd < 0) {
+		fprintf(stderr, "could not create gamma table for output %d\n",
+				output->id);
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void gamma_control_handle_failed(void *data,
+		struct zwlr_gamma_control_v1 *gamma_control) {
+	(void)gamma_control;
+	struct output *output = data;
+	fprintf(stderr, "gamma control of output %d failed\n",
+			output->id);
+	zwlr_gamma_control_v1_destroy(output->gamma_control);
+	output->gamma_control = NULL;
+	if (output->table_fd != -1) {
+		close(output->table_fd);
+		output->table_fd = -1;
+	}
+}
+
+static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
+	.gamma_size = gamma_control_handle_gamma_size,
+	.failed = gamma_control_handle_failed,
+};
+
+static void setup_output(struct output *output) {
+	if (output->gamma_control != NULL) {
+		return;
+	}
+	if (gamma_control_manager == NULL) {
+		fprintf(stderr, "skipping setup of output %d: gamma_control_manager missing\n",
+				output->id);
+		return;
+	}
+	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
+		gamma_control_manager, output->wl_output);
+	zwlr_gamma_control_v1_add_listener(output->gamma_control,
+		&gamma_control_listener, output);
+}
+
+static void registry_handle_global(void *data, struct wl_registry *registry,
+		uint32_t name, const char *interface, uint32_t version) {
+	(void)version;
+	struct context *ctx = (struct context *)data;
+	if (strcmp(interface, wl_output_interface.name) == 0) {
+		fprintf(stderr, "registry: adding output %d\n", name);
+		struct output *output = calloc(1, sizeof(struct output));
+		output->id = name;
+		output->wl_output = wl_registry_bind(registry, name,
+				&wl_output_interface, 1);
+		output->table_fd = -1;
+		output->context = ctx;
+		wl_list_insert(&ctx->outputs, &output->link);
+		setup_output(output);
+	} else if (strcmp(interface,
+				zwlr_gamma_control_manager_v1_interface.name) == 0) {
+		gamma_control_manager = wl_registry_bind(registry, name,
+				&zwlr_gamma_control_manager_v1_interface, 1);
+	}
+}
+
+static void registry_handle_global_remove(void *data,
+		struct wl_registry *registry, uint32_t name) {
+	(void)registry;
+	struct context *ctx = (struct context *)data;
+	struct output *output, *tmp;
+	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
+		if (output->id == name) {
+			fprintf(stderr, "registry: removing output %d\n", name);
+			wl_list_remove(&output->link);
+			if (output->gamma_control != NULL) {
+				zwlr_gamma_control_v1_destroy(output->gamma_control);
+			}
+			if (output->table_fd != -1) {
+				close(output->table_fd);
+			}
+			free(output);
+			break;
+		}
+	}
+}
+
+static const struct wl_registry_listener registry_listener = {
+	.global = registry_handle_global,
+	.global_remove = registry_handle_global_remove,
+};
+
+static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, double gw, double bw, double gamma) {
+	uint16_t *r = table;
+	uint16_t *g = table + ramp_size;
+	uint16_t *b = table + 2 * ramp_size;
+	for (uint32_t i = 0; i < ramp_size; ++i) {
+		double val = (double)i / (ramp_size - 1);
+		r[i] = (uint16_t)(UINT16_MAX * pow(val * rw, 1.0 / gamma));
+		g[i] = (uint16_t)(UINT16_MAX * pow(val * gw, 1.0 / gamma));
+		b[i] = (uint16_t)(UINT16_MAX * pow(val * bw, 1.0 / gamma));
+	}
+}
+
+static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
+	double rw, gw, bw;
+	calc_whitepoint(temp, &rw, &gw, &bw);
+	fprintf(stderr, "setting temperature to %d K\n", temp);
+
+	struct output *output;
+	wl_list_for_each(output, outputs, link) {
+		if (output->gamma_control == NULL || output->table_fd == -1) {
+			continue;
+		}
+		fill_gamma_table(output->table, output->ramp_size,
+				rw, gw, bw, gamma);
+		lseek(output->table_fd, 0, SEEK_SET);
+		zwlr_gamma_control_v1_set_gamma(output->gamma_control,
+				output->table_fd);
+	}
 }
 
 static int timer_fired = 0;
