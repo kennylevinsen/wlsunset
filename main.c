@@ -664,7 +664,6 @@ static const char usage[] = "usage: %s [options]\n"
 "  -L <long>     set longitude (e.g. 116.3)\n"
 "  -s <start>    set manual start time (e.g. 06:30)\n"
 "  -S <stop>     set manual stop time (e.g. 19:30)\n"
-"  -d <minutes>  set manual ramping duration in minutes (default: 60)\n"
 "  -g <gamma>    set gamma (default: 1.0)\n";
 
 int main(int argc, char *argv[]) {
@@ -678,7 +677,6 @@ int main(int argc, char *argv[]) {
 		.high_temp = 6500,
 		.low_temp = 4000,
 		.gamma = 1.0,
-		.duration = -1,
 	};
 
 	int opt;
@@ -695,10 +693,6 @@ int main(int argc, char *argv[]) {
 				break;
 			case 'L':
 				config.longitude = strtod(optarg, NULL);
-				break;
-			case 'd':
-				fprintf(stderr, "using animation duration override\n");
-				config.duration = strtod(optarg, NULL) * 60;
 				break;
 			case 'g':
 				config.gamma = strtod(optarg, NULL);
