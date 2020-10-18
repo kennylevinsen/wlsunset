@@ -45,8 +45,7 @@ static double sun_hour_angle(double latitude, double declination, double target_
 
 static time_t hour_angle_to_time(double longitude, double eqtime, double hour_angle) {
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
-	return isnan(hour_angle) ? -1 :
-		DEGREES((4.0 * M_PI - 4 * (longitude + hour_angle) - eqtime) * 60);
+	return DEGREES((4.0 * M_PI - 4 * (longitude + hour_angle) - eqtime) * 60);
 }
 
 static enum sun_condition condition(double latitude_rad, double sun_declination) {

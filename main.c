@@ -290,47 +290,31 @@ static void set_temperature(struct wl_list *outputs, int temp, int gamma) {
 	}
 }
 
-static const char *sun_condition_str[] = {
-	"normal",
-	"midnight sun",
-	"polar night",
-	"invalid",
-	NULL,
-};
-
-static void print_trajectory(struct context *ctx, time_t day) {
-	fprintf(stderr, "calculated sun trajectory:");
-
-	struct tm tm;
-	if (ctx->sun.dawn >= day) {
-		localtime_r(&ctx->sun.dawn, &tm);
-		fprintf(stderr, " dawn %02d:%02d,", tm.tm_hour, tm.tm_min);
-	} else {
-		fprintf(stderr, " dawn N/A,");
+static void print_trajectory(struct context *ctx) {
+	fprintf(stderr, "calculated sun trajectory: ");
+	struct tm dawn, sunrise, sunset, dusk;
+	switch (ctx->condition) {
+	case NORMAL:
+		localtime_r(&ctx->sun.dawn, &dawn);
+		localtime_r(&ctx->sun.sunrise, &sunrise);
+		localtime_r(&ctx->sun.sunset, &sunset);
+		localtime_r(&ctx->sun.dusk, &dusk);
+		fprintf(stderr,
+			"dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, dusk %02d:%02d\n",
+			dawn.tm_hour, dawn.tm_min,
+			sunrise.tm_hour, sunrise.tm_min,
+			sunset.tm_hour, sunset.tm_min,
+			dusk.tm_hour, dusk.tm_min);
+		break;
+	case MIDNIGHT_SUN:
+		fprintf(stderr, "midnight sun\n");
+		return;
+	case POLAR_NIGHT:
+		fprintf(stderr, "polar night\n");
+		return;
+	default:
+		abort();
 	}
-
-	if (ctx->sun.sunrise >= day) {
-		localtime_r(&ctx->sun.sunrise, &tm);
-		fprintf(stderr, " sunrise %02d:%02d,", tm.tm_hour, tm.tm_min);
-	} else {
-		fprintf(stderr, " sunrise N/A,");
-	}
-
-	if (ctx->sun.sunset >= day) {
-		localtime_r(&ctx->sun.sunset, &tm);
-		fprintf(stderr, " sunset %02d:%02d,", tm.tm_hour, tm.tm_min);
-	} else {
-		fprintf(stderr, " sunset N/A,");
-	}
-
-	if (ctx->sun.dusk >= day) {
-		localtime_r(&ctx->sun.dusk, &tm);
-		fprintf(stderr, " dusk %02d:%02d,", tm.tm_hour, tm.tm_min);
-	} else {
-		fprintf(stderr, " dusk N/A,");
-	}
-
-	fprintf(stderr, " condition: %s\n", sun_condition_str[ctx->condition]);
 }
 
 static int anim_kelvin_step = 25;
@@ -350,12 +334,18 @@ static void recalc_stops(struct context *ctx, time_t now) {
 
 	switch (cond) {
 	case NORMAL:
+		ctx->state = STATE_NORMAL;
+		ctx->sun.dawn = sun.dawn + day;
+		ctx->sun.sunrise = sun.sunrise + day;
+		ctx->sun.sunset = sun.sunset + day;
+		ctx->sun.dusk = sun.dusk + day;
+
 		if (ctx->condition == MIDNIGHT_SUN) {
 			// Yesterday had no sunset, so remove our sunrise.
-			sun.dawn = -1;
-			sun.sunrise = -1;
+			ctx->sun.dawn = day;
+			ctx->sun.sunrise = day;
 		}
-		ctx->state = STATE_NORMAL;
+
 		break;
 	case MIDNIGHT_SUN:
 		if (ctx->condition == POLAR_NIGHT) {
@@ -368,10 +358,8 @@ static void recalc_stops(struct context *ctx, time_t now) {
 		}
 
 		// Borrow yesterday's sunrise to animate into the midnight sun
-		sun.dawn = sun.dawn != -1 ? sun.dawn :
-			ctx->sun.dawn - last_day;
-		sun.sunrise = sun.sunrise != -1 ? sun.sunrise :
-			ctx->sun.sunrise - last_day;
+		sun.dawn = ctx->sun.dawn - last_day + day;
+		sun.sunrise = ctx->sun.sunrise - last_day + day;
 		ctx->state = STATE_TRANSITION;
 		break;
 	case POLAR_NIGHT:
@@ -385,16 +373,11 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	}
 	ctx->condition = cond;
 
-	ctx->sun.dawn = sun.dawn + day;
-	ctx->sun.sunrise = sun.sunrise + day;
-	ctx->sun.sunset = sun.sunset + day;
-	ctx->sun.dusk = sun.dusk + day;
-
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
 	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) * anim_kelvin_step / temp_diff;
 	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) * anim_kelvin_step / temp_diff;
 
-	print_trajectory(ctx, day);
+	print_trajectory(ctx);
 }
 
 static int interpolate_temperature(time_t now, time_t start, time_t stop, int temp_start, int temp_stop) {
