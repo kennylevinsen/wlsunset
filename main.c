@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -505,42 +506,54 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
 }
 
-static int display_poll(struct wl_display *display, short int events, int timeout) {
-	struct pollfd pfd[1];
-	pfd[0].fd = wl_display_get_fd(display);
-	pfd[0].events = events;
-	if (poll(pfd, 1, timeout) == -1) {
-		return errno == EINTR ? 0 : -1;
-	}
-	return 0;
-}
+static int timer_fired = 0;
+static int timer_signal_fds[2];
 
 static int display_dispatch(struct wl_display *display, int timeout) {
 	if (wl_display_prepare_read(display) == -1) {
 		return wl_display_dispatch_pending(display);
 	}
 
-	int ret;
-	while (true) {
-		ret = wl_display_flush(display);
-		if (ret != -1 || errno != EAGAIN) {
-			break;
+	struct pollfd pfd[2];
+	pfd[0].fd = wl_display_get_fd(display);
+	pfd[1].fd = timer_signal_fds[0];
+
+	pfd[0].events = POLLOUT;
+	while (wl_display_flush(display) == -1) {
+		if (errno != EAGAIN && errno != EPIPE) {
+			wl_display_cancel_read(display);
+			return -1;
 		}
 
-		if (display_poll(display, POLLOUT, -1) == -1) {
+		// We only poll the wayland fd here
+		while (poll(pfd, 1, timeout) == -1) {
+			if (errno != EINTR) {
+				wl_display_cancel_read(display);
+				return -1;
+			}
+		}
+	}
+
+	pfd[0].events = POLLIN;
+	pfd[1].events = POLLIN;
+	while (poll(pfd, 2, timeout) == -1) {
+		if (errno != EINTR) {
 			wl_display_cancel_read(display);
 			return -1;
 		}
 	}
 
-	if (ret < 0 && errno != EPIPE) {
-		wl_display_cancel_read(display);
-		return -1;
+	if (pfd[1].revents & POLLIN) {
+		// Empty signal fd
+		char garbage[8];
+		if (read(timer_signal_fds[0], &garbage, sizeof garbage) == -1 && errno != EAGAIN) {
+			return -1;
+		}
 	}
 
-	if (display_poll(display, POLLIN, timeout) == -1) {
+	if ((pfd[0].revents & POLLIN) == 0) {
 		wl_display_cancel_read(display);
-		return -1;
+		return 0;
 	}
 
 	if (wl_display_read_events(display) == -1) {
@@ -550,11 +563,21 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 	return wl_display_dispatch_pending(display);
 }
 
-static int timer_fired = 0;
-
 static void timer_signal(int signal) {
 	(void)signal;
 	timer_fired = true;
+	if (write(timer_signal_fds[1], "\0", 1) == -1 && errno != EAGAIN) {
+		// This is unfortunate.
+	}
+}
+
+static int set_nonblock(int fd) {
+	int flags;
+	if ((flags = fcntl(fd, F_GETFL)) == -1 ||
+			fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+		return -1;
+	}
+	return 0;
 }
 
 static int setup_timer(struct context *ctx) {
@@ -562,11 +585,19 @@ static int setup_timer(struct context *ctx) {
 		.sa_handler = timer_signal,
 		.sa_flags = 0,
 	};
+	if (pipe(timer_signal_fds) == -1) {
+		fprintf(stderr, "could not create signal pipe: %s\n", strerror(errno));
+		return -1;
+	}
+	if (set_nonblock(timer_signal_fds[0]) == -1 ||
+			set_nonblock(timer_signal_fds[1]) == -1) {
+		fprintf(stderr, "could not set nonblock on signal pipe: %s\n", strerror(errno));
+		return -1;
+	}
 	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
 		fprintf(stderr, "could not configure alarm handler: %s\n", strerror(errno));
 		return -1;
 	}
-
 	if (timer_create(CLOCK_REALTIME, NULL, &ctx->timer) == -1) {
 		fprintf(stderr, "could not configure timer: %s\n", strerror(errno));
 		return -1;
