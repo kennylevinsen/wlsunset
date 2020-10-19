@@ -43,9 +43,9 @@ static double sun_hour_angle(double latitude, double declination, double target_
 		tan(latitude) * tan(declination));
 }
 
-static time_t hour_angle_to_time(double longitude, double eqtime, double hour_angle) {
+static time_t hour_angle_to_time(double hour_angle, double eqtime) {
 	// https://www.esrl.noaa.gov/gmd/grad/solcalc/solareqns.PDF
-	return DEGREES((4.0 * M_PI - 4 * (longitude + hour_angle) - eqtime) * 60);
+	return DEGREES((4.0 * M_PI - 4 * hour_angle - eqtime) * 60);
 }
 
 static enum sun_condition condition(double latitude_rad, double sun_declination) {
@@ -54,7 +54,7 @@ static enum sun_condition condition(double latitude_rad, double sun_declination)
 	return sign_lat == sign_decl ? MIDNIGHT_SUN : POLAR_NIGHT;
 }
 
-enum sun_condition calc_sun(struct tm *tm, double longitude, double latitude, struct sun *sun) {
+enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun) {
 	double orbit_angle = date_orbit_angle(tm);
 	double decl = sun_declination(orbit_angle);
 	double eqtime = equation_of_time(orbit_angle);
@@ -62,10 +62,10 @@ enum sun_condition calc_sun(struct tm *tm, double longitude, double latitude, st
 	double ha_twilight = sun_hour_angle(latitude, decl, SOLAR_START_TWILIGHT);
 	double ha_daylight = sun_hour_angle(latitude, decl, SOLAR_END_TWILIGHT);
 
-	sun->dawn = hour_angle_to_time(longitude, eqtime, fabs(ha_twilight));
-	sun->dusk = hour_angle_to_time(longitude, eqtime, -fabs(ha_twilight));
-	sun->sunrise = hour_angle_to_time(longitude, eqtime, fabs(ha_daylight));
-	sun->sunset = hour_angle_to_time(longitude, eqtime, -fabs(ha_daylight));
+	sun->dawn = hour_angle_to_time(fabs(ha_twilight), eqtime);
+	sun->dusk = hour_angle_to_time(-fabs(ha_twilight), eqtime);
+	sun->sunrise = hour_angle_to_time(fabs(ha_daylight), eqtime);
+	sun->sunset = hour_angle_to_time(-fabs(ha_daylight), eqtime);
 
 	return isnan(ha_twilight) || isnan(ha_daylight) ? condition(latitude, decl) : NORMAL;
 }

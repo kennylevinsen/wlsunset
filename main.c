@@ -64,12 +64,16 @@ static inline void adjust_timerspec(struct itimerspec *timerspec) {
 }
 #endif
 
-static time_t round_day(time_t now) {
-	return now - (now % 86400);
+static time_t round_day_offset(time_t now, time_t offset) {
+	return now - ((now - offset) % 86400);
 }
 
-static time_t tomorrow(time_t now) {
-	return round_day(now) + 86400;
+static time_t tomorrow(time_t now, time_t offset) {
+	return round_day_offset(now, offset) + 86400;
+}
+
+static time_t longitude_time_offset(double longitude) {
+	return longitude * 43200 / M_PI;
 }
 
 struct config {
@@ -93,6 +97,8 @@ enum state {
 struct context {
 	struct config config;
 	struct sun sun;
+
+	double longitude_time_offset;
 
 	enum state state;
 	enum sun_condition condition;
@@ -149,7 +155,7 @@ static void print_trajectory(struct context *ctx) {
 static int anim_kelvin_step = 25;
 
 static void recalc_stops(struct context *ctx, time_t now) {
-	time_t day = round_day(now);
+	time_t day = round_day_offset(now, -ctx->longitude_time_offset);
 	time_t last_day = ctx->calc_day;
 	if (day == last_day) {
 		return;
@@ -159,7 +165,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	struct sun sun;
 	struct tm tm = { 0 };
 	gmtime_r(&day, &tm);
-	enum sun_condition cond = calc_sun(&tm, ctx->config.longitude, ctx->config.latitude, &sun);
+	enum sun_condition cond = calc_sun(&tm, ctx->config.latitude, &sun);
 
 	switch (cond) {
 	case NORMAL:
@@ -272,7 +278,7 @@ static time_t get_deadline_normal(const struct context *ctx, time_t now) {
 	} else if (now < ctx->sun.dusk) {
 		return now + ctx->dusk_step_time;
 	} else {
-		return tomorrow(now);
+		return tomorrow(now, -ctx->longitude_time_offset);
 	}
 }
 
@@ -284,7 +290,7 @@ static time_t get_deadline_transition(const struct context *ctx, time_t now) {
 		}
 		// fallthrough
 	case POLAR_NIGHT:
-		return tomorrow(now);
+		return tomorrow(now, -ctx->longitude_time_offset);
 	default:
 		abort();
 	}
@@ -300,7 +306,7 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 		deadline = get_deadline_transition(ctx, now);
 		break;
 	case STATE_STATIC:
-		deadline = tomorrow(now);
+		deadline = tomorrow(now, -ctx->longitude_time_offset);
 		break;
 	default:
 		abort();
@@ -595,6 +601,7 @@ static int wlrun(struct config cfg) {
 	struct context ctx = {
 		.sun = { 0 },
 		.condition = SUN_CONDITION_LAST,
+		.longitude_time_offset = longitude_time_offset(cfg.longitude),
 		.state = STATE_INITIAL,
 		.config = cfg,
 	};
