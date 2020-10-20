@@ -59,7 +59,9 @@ static inline void init_time(void) {
 	tzset();
 }
 static inline time_t get_time_sec(void) {
-	return time(NULL);
+	struct timespec realtime;
+	clock_gettime(CLOCK_REALTIME, &realtime);
+	return realtime.tv_sec;
 }
 static inline void adjust_timerspec(struct itimerspec *timerspec) {
 	(void)timerspec;
