@@ -67,7 +67,8 @@ enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun) {
 	sun->sunrise = hour_angle_to_time(fabs(ha_daylight), eqtime);
 	sun->sunset = hour_angle_to_time(-fabs(ha_daylight), eqtime);
 
-	return isnan(ha_twilight) || isnan(ha_daylight) ? condition(latitude, decl) : NORMAL;
+	return isnan(ha_twilight) || isnan(ha_daylight) ?
+		condition(latitude, decl) : NORMAL;
 }
 
 static int illuminant_d(int temp, double *x, double *y) {

@@ -40,11 +40,13 @@ static void init_time(void) {
 static time_t get_time_sec(void) {
 	struct timespec realtime;
 	clock_gettime(CLOCK_REALTIME, &realtime);
-	time_t now = start + ((realtime.tv_sec - offset) * multiplier + realtime.tv_nsec / (1000000000 / multiplier));
+	time_t now = start + ((realtime.tv_sec - offset) * multiplier +
+			realtime.tv_nsec / (1000000000 / multiplier));
 	struct tm tm;
 	localtime_r(&now, &tm);
-	fprintf(stderr, "time in termina: %02d:%02d:%02d, %d/%d/%d\n", tm.tm_hour, tm.tm_min, tm.tm_sec,
-			tm.tm_mday, tm.tm_mon+1, tm.tm_year + 1900);
+	fprintf(stderr, "time in termina: %02d:%02d:%02d, %d/%d/%d\n",
+			tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_mday,
+			tm.tm_mon+1, tm.tm_year + 1900);
 	return now;
 }
 static void adjust_timerspec(struct itimerspec *timerspec) {
@@ -156,10 +158,11 @@ static int anim_kelvin_step = 25;
 
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = round_day_offset(now, -ctx->longitude_time_offset);
-	time_t last_day = ctx->calc_day;
-	if (day == last_day) {
+	if (day == ctx->calc_day) {
 		return;
 	}
+
+	time_t last_day = ctx->calc_day;
 	ctx->calc_day = day;
 
 	struct sun sun;
@@ -209,13 +212,16 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	ctx->condition = cond;
 
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
-	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) * anim_kelvin_step / temp_diff;
-	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) * anim_kelvin_step / temp_diff;
+	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) *
+		anim_kelvin_step / temp_diff;
+	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) *
+		anim_kelvin_step / temp_diff;
 
 	print_trajectory(ctx);
 }
 
-static int interpolate_temperature(time_t now, time_t start, time_t stop, int temp_start, int temp_stop) {
+static int interpolate_temperature(time_t now, time_t start, time_t stop,
+		int temp_start, int temp_stop) {
 	if (start == stop) {
 		return stop;
 	}
@@ -233,11 +239,15 @@ static int get_temperature_normal(const struct context *ctx, time_t now) {
 	if (now < ctx->sun.dawn) {
 		return ctx->config.low_temp;
 	} else if (now < ctx->sun.sunrise) {
-		return interpolate_temperature(now, ctx->sun.dawn, ctx->sun.sunrise, ctx->config.low_temp, ctx->config.high_temp);
+		return interpolate_temperature(now, ctx->sun.dawn,
+				ctx->sun.sunrise, ctx->config.low_temp,
+				ctx->config.high_temp);
 	} else if (now < ctx->sun.sunset) {
 		return ctx->config.high_temp;
 	} else if (now < ctx->sun.dusk) {
-		return interpolate_temperature(now, ctx->sun.sunset, ctx->sun.dusk, ctx->config.high_temp, ctx->config.low_temp);
+		return interpolate_temperature(now, ctx->sun.sunset,
+				ctx->sun.dusk, ctx->config.high_temp,
+				ctx->config.low_temp);
 	} else {
 		return ctx->config.low_temp;
 	}
@@ -262,7 +272,8 @@ static int get_temperature(const struct context *ctx, time_t now) {
 	case STATE_TRANSITION:
 		return get_temperature_transition(ctx, now);
 	case STATE_STATIC:
-		return ctx->condition == MIDNIGHT_SUN ? ctx->config.high_temp : ctx->config.low_temp;
+		return ctx->condition == MIDNIGHT_SUN ? ctx->config.high_temp :
+			ctx->config.low_temp;
 	default:
 		abort();
 	}
@@ -465,7 +476,8 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_handle_global_remove,
 };
 
-static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw, double gw, double bw, double gamma) {
+static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw,
+		double gw, double bw, double gamma) {
 	uint16_t *r = table;
 	uint16_t *g = table + ramp_size;
 	uint16_t *b = table + 2 * ramp_size;
@@ -535,7 +547,8 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 	if (pfd[1].revents & POLLIN) {
 		// Empty signal fd
 		char garbage[8];
-		if (read(timer_signal_fds[0], &garbage, sizeof garbage) == -1 && errno != EAGAIN) {
+		if (read(timer_signal_fds[0], &garbage, sizeof garbage) == -1
+				&& errno != EAGAIN) {
 			return -1;
 		}
 	}
@@ -575,20 +588,24 @@ static int setup_timer(struct context *ctx) {
 		.sa_flags = 0,
 	};
 	if (pipe(timer_signal_fds) == -1) {
-		fprintf(stderr, "could not create signal pipe: %s\n", strerror(errno));
+		fprintf(stderr, "could not create signal pipe: %s\n",
+				strerror(errno));
 		return -1;
 	}
 	if (set_nonblock(timer_signal_fds[0]) == -1 ||
 			set_nonblock(timer_signal_fds[1]) == -1) {
-		fprintf(stderr, "could not set nonblock on signal pipe: %s\n", strerror(errno));
+		fprintf(stderr, "could not set nonblock on signal pipe: %s\n",
+				strerror(errno));
 		return -1;
 	}
 	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
-		fprintf(stderr, "could not configure alarm handler: %s\n", strerror(errno));
+		fprintf(stderr, "could not configure alarm handler: %s\n",
+				strerror(errno));
 		return -1;
 	}
 	if (timer_create(CLOCK_REALTIME, NULL, &ctx->timer) == -1) {
-		fprintf(stderr, "could not configure timer: %s\n", strerror(errno));
+		fprintf(stderr, "could not configure timer: %s\n",
+				strerror(errno));
 		return -1;
 	}
 	return 0;
@@ -622,8 +639,7 @@ static int wlrun(struct config cfg) {
 	wl_display_roundtrip(display);
 
 	if (gamma_control_manager == NULL) {
-		fprintf(stderr,
-				"compositor doesn't support wlr-gamma-control-unstable-v1\n");
+		fprintf(stderr, "compositor doesn't support wlr-gamma-control-unstable-v1\n");
 		return EXIT_FAILURE;
 	}
 
@@ -652,7 +668,8 @@ static int wlrun(struct config cfg) {
 			if ((temp = get_temperature(&ctx, now)) != old_temp) {
 				old_temp = temp;
 				ctx.new_output = false;
-				set_temperature(&ctx.outputs, temp, ctx.config.gamma);
+				set_temperature(&ctx.outputs, temp,
+						ctx.config.gamma);
 			}
 		} else if (ctx.new_output) {
 			ctx.new_output = false;
@@ -717,12 +734,14 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 	if (config.latitude > 90.0 || config.latitude < -90.0) {
-		fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n", config.latitude);
+		fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n",
+				config.latitude);
 		return EXIT_FAILURE;
 	}
 	config.latitude = RADIANS(config.latitude);
 	if (config.longitude > 180.0 || config.longitude < -180.0) {
-		fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n", config.longitude);
+		fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n",
+				config.longitude);
 		return EXIT_FAILURE;
 	}
 	config.longitude = RADIANS(config.longitude);
