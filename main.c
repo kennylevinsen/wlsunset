@@ -684,12 +684,10 @@ static int wlrun(struct config cfg) {
 
 static const char usage[] = "usage: %s [options]\n"
 "  -h            show this help message\n"
-"  -T <temp>     set high temperature (default: 6500)\n"
 "  -t <temp>     set low temperature (default: 4000)\n"
+"  -T <temp>     set high temperature (default: 6500)\n"
 "  -l <lat>      set latitude (e.g. 39.9)\n"
 "  -L <long>     set longitude (e.g. 116.3)\n"
-"  -s <start>    set manual start time (e.g. 06:30)\n"
-"  -S <stop>     set manual stop time (e.g. 19:30)\n"
 "  -g <gamma>    set gamma (default: 1.0)\n";
 
 int main(int argc, char *argv[]) {
@@ -708,11 +706,11 @@ int main(int argc, char *argv[]) {
 	int opt;
 	while ((opt = getopt(argc, argv, "ht:T:l:L:d:g:")) != -1) {
 		switch (opt) {
-			case 'T':
-				config.high_temp = strtol(optarg, NULL, 10);
-				break;
 			case 't':
 				config.low_temp = strtol(optarg, NULL, 10);
+				break;
+			case 'T':
+				config.high_temp = strtol(optarg, NULL, 10);
 				break;
 			case 'l':
 				config.latitude = strtod(optarg, NULL);
