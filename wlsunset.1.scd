@@ -2,7 +2,8 @@ wlsunset(1)
 
 # NAME
 
-wlsunet - Day/night gamma adjustments for Wayland compositors supporting wlr-gamma-control-unstable-v1
+wlsunet - Day/night gamma adjustments for Wayland compositors supporting
+wlr-gamma-control-unstable-v1
 
 # SYNOPSIS
 
@@ -24,12 +25,6 @@ wlsunet - Day/night gamma adjustments for Wayland compositors supporting wlr-gam
 
 *-L* <long>
 	set longitude (e.g. 116.3)
-
-*-s* <start>
-	set manual start time (e.g. 06:30)
-
-*-S* <stop>
-	set manual stop time (e.g. 19:30)
 
 *-g* <gamma>
 	set gamma (default: 1.0)
