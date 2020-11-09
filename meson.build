@@ -50,7 +50,7 @@ rt = cc.find_library('rt')
 executable(
 	'wlsunset',
 	['main.c', 'color_math.c'],
-	dependencies: [protocols_dep, m, rt],
+	dependencies: [wl_client, protocols_dep, m, rt],
 	install: true,
 )
 
