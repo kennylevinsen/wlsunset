@@ -19,8 +19,8 @@ add_project_arguments(
 		'-Wold-style-definition', # nop
 		'-Wpointer-arith',
 		'-Wstrict-prototypes',
-		'-Wimplicit-fallthrough',
 		'-Wmissing-prototypes',
+		'-Wno-implicit-fallthrough',
 		'-Wno-unknown-warning-option',
 		'-Wno-unused-command-line-argument',
 		'-Wvla',
