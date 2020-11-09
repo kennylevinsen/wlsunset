@@ -1,0 +1,13 @@
+image: alpine/edge
+packages:
+   - meson
+   - wayland
+   - wayland-dev
+   - wayland-protocols
+sources:
+   - https://git.sr.ht/~kennylevinsen/wlsunset
+tasks:
+   - build: |
+      meson build wlsunset
+      ninja -C build
+
