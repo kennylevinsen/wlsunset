@@ -71,9 +71,17 @@ enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun) {
 		condition(latitude, decl) : NORMAL;
 }
 
+/*
+ * Illuminant D, or daylight locus, is is a "standard illuminant" used to
+ * describe natural daylight. It is on this locus that D65, the whitepoint used
+ * by most monitors and assumed by wlsunset, is defined.
+ *
+ * This approximation is strictly speaking only well-defined between 4000K and
+ * 25000K, but we stretch it a bit further down for transition purposes.
+ */
 static int illuminant_d(int temp, double *x, double *y) {
 	// https://en.wikipedia.org/wiki/Standard_illuminant#Illuminant_series_D
-	if (temp >= 4000 && temp <= 7000) {
+	if (temp >= 2500 && temp <= 7000) {
 		*x = 0.244063 +
 			0.09911e3 / temp +
 			2.9678e6 / pow(temp, 2) -
@@ -91,7 +99,15 @@ static int illuminant_d(int temp, double *x, double *y) {
 	return 0;
 }
 
+/*
+ * Planckian locus, or black body locus, describes the color of a black body at
+ * a certain temperatures. This is not entirely equivalent to daylight due to
+ * atmospheric effects.
+ *
+ * This approximation is only valid from 1667K to 25000K.
+ */
 static int planckian_locus(int temp, double *x, double *y) {
+	// https://en.wikipedia.org/wiki/Planckian_locus#Approximation
 	if (temp >= 1667 && temp <= 4000) {
 		*x = -0.2661239e9 / pow(temp, 3) -
 			0.2343589e6 / pow(temp, 2) +
@@ -164,10 +180,23 @@ void calc_whitepoint(int temp, double *rw, double *gw, double *bw) {
 	}
 
 	double x = 1.0, y = 1.0;
-	if (temp > 1667 && temp <= 6500) {
-		planckian_locus(temp, &x, &y);
-	} else if (temp >= 6500 && temp <= 25000) {
+	if (temp >= 25000) {
+		illuminant_d(25000, &x, &y);
+	} else if (temp >= 4000) {
 		illuminant_d(temp, &x, &y);
+	} else if (temp >= 2500) {
+		double x1, y1, x2, y2;
+		illuminant_d(temp, &x1, &y1);
+		planckian_locus(temp, &x2, &y2);
+
+		double factor = (4000 - temp) / 1500;
+		double sinefactor = (cos(M_PI*factor) + 1.0) / 2.0;
+		x = x1 * sinefactor + x2 * (1.0 - sinefactor);
+		y = y1 * sinefactor + y2 * (1.0 - sinefactor);
+	} else if (temp >= 1667) {
+		planckian_locus(temp, &x, &y);
+	} else {
+		planckian_locus(1667, &x, &y);
 	}
 	double z = 1.0 - x - y;
 
