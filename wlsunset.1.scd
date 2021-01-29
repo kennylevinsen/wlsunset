@@ -26,6 +26,17 @@ wlr-gamma-control-unstable-v1
 *-L* <long>
 	set longitude (e.g. 116.3)
 
+*-S* <sunrise>
+	Manual time for sunrise as HH:MM (e.g. 06:30)
+
+*-s* <sunset>
+	Manual time for sunset as HH:MM (e.g. 18:30)
+
+*-d* <duration>
+	Manual animation time in seconds (e.g. 1800)
+
+	Only applicable when using manual sunset/sunrise times.
+
 *-g* <gamma>
 	set gamma (default: 1.0)
 

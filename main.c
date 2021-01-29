@@ -88,7 +88,10 @@ struct config {
 	double longitude;
 	double latitude;
 
-	int duration;
+	bool manual_time;
+	time_t sunrise;
+	time_t sunset;
+	time_t duration;
 };
 
 enum state {
@@ -167,10 +170,22 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	time_t last_day = ctx->calc_day;
 	ctx->calc_day = day;
 
+	enum sun_condition cond = NORMAL;
+
+	if (ctx->config.manual_time) {
+		ctx->state = STATE_NORMAL;
+		ctx->sun.dawn = ctx->config.sunrise - ctx->config.duration + day;
+		ctx->sun.sunrise = ctx->config.sunrise + day;
+		ctx->sun.sunset = ctx->config.sunset + day;
+		ctx->sun.dusk = ctx->config.sunset + ctx->config.duration + day;
+
+		goto done;
+	}
+
 	struct sun sun;
 	struct tm tm = { 0 };
 	gmtime_r(&day, &tm);
-	enum sun_condition cond = calc_sun(&tm, ctx->config.latitude, &sun);
+	cond = calc_sun(&tm, ctx->config.latitude, &sun);
 
 	switch (cond) {
 	case NORMAL:
@@ -211,6 +226,8 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	default:
 		abort();
 	}
+
+done:
 	ctx->condition = cond;
 
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
@@ -614,16 +631,18 @@ static int setup_timer(struct context *ctx) {
 }
 
 static int wlrun(struct config cfg) {
-	init_time();
 
 	// Initialize defaults
 	struct context ctx = {
 		.sun = { 0 },
 		.condition = SUN_CONDITION_LAST,
-		.longitude_time_offset = longitude_time_offset(cfg.longitude),
 		.state = STATE_INITIAL,
 		.config = cfg,
 	};
+	if (!cfg.manual_time) {
+		ctx.longitude_time_offset = longitude_time_offset(cfg.longitude);
+	}
+
 	wl_list_init(&ctx.outputs);
 
 	if (setup_timer(&ctx) == -1) {
@@ -682,29 +701,43 @@ static int wlrun(struct config cfg) {
 	return EXIT_SUCCESS;
 }
 
+static int parse_time_of_day(const char *s, time_t *time) {
+	struct tm tm = { 0 };
+
+	if (strptime(s, "%H:%M", &tm) == NULL) {
+		return -1;
+	}
+	*time = tm.tm_hour * 3600 + tm.tm_min * 60 + timezone;
+	return 0;
+}
+
 static const char usage[] = "usage: %s [options]\n"
-"  -h            show this help message\n"
-"  -t <temp>     set low temperature (default: 4000)\n"
-"  -T <temp>     set high temperature (default: 6500)\n"
-"  -l <lat>      set latitude (e.g. 39.9)\n"
-"  -L <long>     set longitude (e.g. 116.3)\n"
-"  -g <gamma>    set gamma (default: 1.0)\n";
+"  -h             show this help message\n"
+"  -t <temp>      set low temperature (default: 4000)\n"
+"  -T <temp>      set high temperature (default: 6500)\n"
+"  -l <lat>       set latitude (e.g. 39.9)\n"
+"  -L <long>      set longitude (e.g. 116.3)\n"
+"  -S <sunrise>   set manual sunrise (e.g. 06:30)\n"
+"  -s <sunset>    set manual sunset (e.g. 18:30)\n"
+"  -d <duration>  set manual duration in seconds (e.g. 1800)\n"
+"  -g <gamma>     set gamma (default: 1.0)\n";
 
 int main(int argc, char *argv[]) {
 #ifdef SPEEDRUN
 	fprintf(stderr, "warning: speedrun mode enabled\n");
 #endif
+	init_time();
 
 	struct config config = {
-		.latitude = 0,
-		.longitude = 0,
+		.latitude = NAN,
+		.longitude = NAN,
 		.high_temp = 6500,
 		.low_temp = 4000,
 		.gamma = 1.0,
 	};
 
 	int opt;
-	while ((opt = getopt(argc, argv, "ht:T:l:L:d:g:")) != -1) {
+	while ((opt = getopt(argc, argv, "ht:T:l:L:S:s:d:g:")) != -1) {
 		switch (opt) {
 			case 't':
 				config.low_temp = strtol(optarg, NULL, 10);
@@ -717,6 +750,23 @@ int main(int argc, char *argv[]) {
 				break;
 			case 'L':
 				config.longitude = strtod(optarg, NULL);
+				break;
+			case 'S':
+				if (parse_time_of_day(optarg, &config.sunrise) != 0) {
+					fprintf(stderr, "invalid time, expected HH:MM, got %s\n", optarg);
+					return EXIT_FAILURE;
+				}
+				config.manual_time = true;
+				break;
+			case 's':
+				if (parse_time_of_day(optarg, &config.sunset) != 0) {
+					fprintf(stderr, "invalid time, expected HH:MM, got %s\n", optarg);
+					return EXIT_FAILURE;
+				}
+				config.manual_time = true;
+				break;
+			case 'd':
+				config.duration = strtol(optarg, NULL, 10);
 				break;
 			case 'g':
 				config.gamma = strtod(optarg, NULL);
@@ -731,20 +781,27 @@ int main(int argc, char *argv[]) {
 	if (config.high_temp <= config.low_temp) {
 		fprintf(stderr, "high temp (%d) must be higher than low (%d) temp\n",
 				config.high_temp, config.low_temp);
-		return -1;
-	}
-	if (config.latitude > 90.0 || config.latitude < -90.0) {
-		fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n",
-				config.latitude);
 		return EXIT_FAILURE;
 	}
-	config.latitude = RADIANS(config.latitude);
-	if (config.longitude > 180.0 || config.longitude < -180.0) {
-		fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n",
-				config.longitude);
-		return EXIT_FAILURE;
+	if (config.manual_time) {
+		if (!isnan(config.latitude) || !isnan(config.longitude)) {
+			fprintf(stderr, "latitude and longitude are not valid in manual time mode\n");
+			return EXIT_FAILURE;
+		}
+	} else {
+		if (config.latitude > 90.0 || config.latitude < -90.0) {
+			fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n",
+					config.latitude);
+			return EXIT_FAILURE;
+		}
+		config.latitude = RADIANS(config.latitude);
+		if (config.longitude > 180.0 || config.longitude < -180.0) {
+			fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n",
+					config.longitude);
+			return EXIT_FAILURE;
+		}
+		config.longitude = RADIANS(config.longitude);
 	}
-	config.longitude = RADIANS(config.longitude);
 
 	return wlrun(config);
 }
