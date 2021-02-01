@@ -1,6 +1,7 @@
 project(
 	'wlsunset',
 	'c',
+	version: '0.1.0',
 	license: 'MIT',
 	meson_version: '>=0.53.0',
 	default_options: [
@@ -27,6 +28,7 @@ add_project_arguments(
 		'-Wl,--exclude-libs=ALL',
 		'-D_USE_MATH_DEFINES',
 		'-D_XOPEN_SOURCE=700',
+		'-DWLSUNSET_VERSION="@0@"'.format(meson.project_version()),
 	],
 	language: 'c',
 )

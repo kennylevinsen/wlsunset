@@ -713,6 +713,7 @@ static int parse_time_of_day(const char *s, time_t *time) {
 
 static const char usage[] = "usage: %s [options]\n"
 "  -h             show this help message\n"
+"  -v             show the version number\n"
 "  -t <temp>      set low temperature (default: 4000)\n"
 "  -T <temp>      set high temperature (default: 6500)\n"
 "  -l <lat>       set latitude (e.g. 39.9)\n"
@@ -737,7 +738,7 @@ int main(int argc, char *argv[]) {
 	};
 
 	int opt;
-	while ((opt = getopt(argc, argv, "ht:T:l:L:S:s:d:g:")) != -1) {
+	while ((opt = getopt(argc, argv, "hvt:T:l:L:S:s:d:g:")) != -1) {
 		switch (opt) {
 			case 't':
 				config.low_temp = strtol(optarg, NULL, 10);
@@ -771,6 +772,9 @@ int main(int argc, char *argv[]) {
 			case 'g':
 				config.gamma = strtod(optarg, NULL);
 				break;
+			case 'v':
+				printf("wlsunset version %s\n", WLSUNSET_VERSION);
+				return EXIT_SUCCESS;
 			case 'h':
 			default:
 				fprintf(stderr, usage, argv[0]);
