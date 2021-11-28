@@ -707,7 +707,12 @@ static int parse_time_of_day(const char *s, time_t *time) {
 	if (strptime(s, "%H:%M", &tm) == NULL) {
 		return -1;
 	}
-	*time = tm.tm_hour * 3600 + tm.tm_min * 60 + timezone;
+	*time = tm.tm_hour * 3600 + tm.tm_min * 60;
+#if defined(__FreeBSD__)
+	*time += tm.tm_gmtoff;
+#else
+	*time += timezone;
+#endif
 	return 0;
 }
 
