@@ -14,8 +14,10 @@
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
 
+#include "xdg-output-unstable-v1-client-protocol.h"
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "color_math.h"
+#include "str_vec.h"
 
 #if defined(SPEEDRUN)
 static time_t start = 0, offset = 0, multiplier = 1000;
@@ -92,6 +94,8 @@ struct config {
 	time_t sunrise;
 	time_t sunset;
 	time_t duration;
+
+	struct str_vec output_names;
 };
 
 enum state {
@@ -117,6 +121,9 @@ struct context {
 	bool new_output;
 	struct wl_list outputs;
 	timer_t timer;
+
+	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
+	struct zxdg_output_manager_v1 *xdg_output_manager;
 };
 
 struct output {
@@ -124,12 +131,14 @@ struct output {
 
 	struct context *context;
 	struct wl_output *wl_output;
+	struct zxdg_output_v1 *xdg_output;
 	struct zwlr_gamma_control_v1 *gamma_control;
 
 	int table_fd;
 	uint32_t id;
 	uint32_t ramp_size;
 	uint16_t *table;
+	char *name;
 };
 
 static void print_trajectory(struct context *ctx) {
@@ -354,7 +363,6 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
 }
 
-static struct zwlr_gamma_control_manager_v1 *gamma_control_manager = NULL;
 
 static int create_anonymous_file(off_t size) {
 	char template[] = "/tmp/wlsunset-shared-XXXXXX";
@@ -433,17 +441,63 @@ static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
 	.failed = gamma_control_handle_failed,
 };
 
-static void setup_output(struct output *output) {
+static void xdg_output_handle_logical_position(void *data,
+		struct zxdg_output_v1 *xdg_output, int32_t x, int32_t y) {
+	(void)data, (void)xdg_output, (void)x, (void)y;
+}
+
+static void xdg_output_handle_logical_size(void *data,
+		struct zxdg_output_v1 *xdg_output, int32_t width, int32_t height) {
+	(void)data, (void)xdg_output, (void)width, (void)height;
+}
+
+static void xdg_output_handle_done(void *data,
+		struct zxdg_output_v1 *xdg_output) {
+	(void)data, (void)xdg_output;
+}
+
+static void xdg_output_handle_name(void *data,
+		struct zxdg_output_v1 *xdg_output, const char *name) {
+	(void)xdg_output;
+	struct output *output = data;
+	output->name = strdup(name);
+}
+
+static void xdg_output_handle_description(void *data,
+		struct zxdg_output_v1 *xdg_output, const char *description) {
+	(void)data, (void)xdg_output, (void)description;
+}
+
+static const struct zxdg_output_v1_listener xdg_output_listener = {
+	.logical_position = xdg_output_handle_logical_position,
+	.logical_size = xdg_output_handle_logical_size,
+	.done = xdg_output_handle_done,
+	.name = xdg_output_handle_name,
+	.description = xdg_output_handle_description,
+};
+
+static void setup_xdg_output(struct context *ctx, struct output *output) {
+	if (ctx->xdg_output_manager == NULL) {
+		fprintf(stderr, "skipping setup of output %d: xdg_output_manager is missing\n",
+				output->id);
+		return;
+	}
+	output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+		ctx->xdg_output_manager, output->wl_output);
+	zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
+}
+
+static void setup_gamma_control(struct context *ctx, struct output *output) {
 	if (output->gamma_control != NULL) {
 		return;
 	}
-	if (gamma_control_manager == NULL) {
+	if (ctx->gamma_control_manager == NULL) {
 		fprintf(stderr, "skipping setup of output %d: gamma_control_manager missing\n",
 				output->id);
 		return;
 	}
 	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
-		gamma_control_manager, output->wl_output);
+		ctx->gamma_control_manager, output->wl_output);
 	zwlr_gamma_control_v1_add_listener(output->gamma_control,
 		&gamma_control_listener, output);
 }
@@ -461,10 +515,18 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 		output->table_fd = -1;
 		output->context = ctx;
 		wl_list_insert(&ctx->outputs, &output->link);
-		setup_output(output);
+
+		if (ctx->config.output_names.len > 0) {
+			setup_xdg_output(ctx, output);
+		}
+		setup_gamma_control(ctx, output);
+	} else if (ctx->config.output_names.len > 0 && strcmp(interface,
+			zxdg_output_manager_v1_interface.name) == 0) {
+		ctx->xdg_output_manager = wl_registry_bind(registry, name,
+				&zxdg_output_manager_v1_interface, version);
 	} else if (strcmp(interface,
 				zwlr_gamma_control_manager_v1_interface.name) == 0) {
-		gamma_control_manager = wl_registry_bind(registry, name,
+		ctx->gamma_control_manager = wl_registry_bind(registry, name,
 				&zwlr_gamma_control_manager_v1_interface, 1);
 	}
 }
@@ -478,6 +540,9 @@ static void registry_handle_global_remove(void *data,
 		if (output->id == name) {
 			fprintf(stderr, "registry: removing output %d\n", name);
 			wl_list_remove(&output->link);
+			if (output->xdg_output != NULL) {
+				zxdg_output_v1_destroy(output->xdg_output);
+			}
 			if (output->gamma_control != NULL) {
 				zwlr_gamma_control_v1_destroy(output->gamma_control);
 			}
@@ -508,21 +573,51 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw,
 	}
 }
 
-static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
+static void set_temperature(struct output *output, double rw,
+		double gw, double bw, double gamma) {
+	if (output->gamma_control == NULL || output->table_fd == -1) {
+		return;
+	}
+	fill_gamma_table(output->table, output->ramp_size, rw, gw, bw, gamma);
+	lseek(output->table_fd, 0, SEEK_SET);
+	zwlr_gamma_control_v1_set_gamma(output->gamma_control,
+			output->table_fd);
+}
+
+static void set_temperature_all_outputs(struct wl_list *outputs,
+		struct config *cfg, int temp, double gamma) {
 	double rw, gw, bw;
 	calc_whitepoint(temp, &rw, &gw, &bw);
-	fprintf(stderr, "setting temperature to %d K\n", temp);
 
+	// If outputs specified by user, then set temperature only for them.
+	// Otherwise set temperature for all outputs.
 	struct output *output;
-	wl_list_for_each(output, outputs, link) {
-		if (output->gamma_control == NULL || output->table_fd == -1) {
-			continue;
+	if (cfg->output_names.len > 0) {
+		for (size_t i = 0; i < cfg->output_names.len; ++i) {
+			bool output_exists = false;
+			wl_list_for_each(output, outputs, link) {
+				if (output->name && strcmp(output->name, cfg->output_names.data[i]) == 0) {
+					fprintf(stderr,
+						"setting temperature on '%s' to %d K\n",
+						output->name, temp);
+					set_temperature(output, rw, gw, bw, gamma);
+					output_exists = true;
+					break;
+				}
+			}
+			if (!output_exists) {
+				fprintf(stderr, "Output '%s' not found!\n",
+						cfg->output_names.data[i]);
+			}
+
 		}
-		fill_gamma_table(output->table, output->ramp_size,
-				rw, gw, bw, gamma);
-		lseek(output->table_fd, 0, SEEK_SET);
-		zwlr_gamma_control_v1_set_gamma(output->gamma_control,
-				output->table_fd);
+	} else {
+		wl_list_for_each(output, outputs, link) {
+			fprintf(stderr,
+				"setting temperature on output '%d' to %d K\n",
+				output->id, temp);
+			set_temperature(output, rw, gw, bw, gamma);
+		}
 	}
 }
 
@@ -631,7 +726,6 @@ static int setup_timer(struct context *ctx) {
 }
 
 static int wlrun(struct config cfg) {
-
 	// Initialize defaults
 	struct context ctx = {
 		.sun = { 0 },
@@ -639,6 +733,7 @@ static int wlrun(struct config cfg) {
 		.state = STATE_INITIAL,
 		.config = cfg,
 	};
+
 	if (!cfg.manual_time) {
 		ctx.longitude_time_offset = longitude_time_offset(cfg.longitude);
 	}
@@ -659,14 +754,22 @@ static int wlrun(struct config cfg) {
 	wl_registry_add_listener(registry, &registry_listener, &ctx);
 	wl_display_roundtrip(display);
 
-	if (gamma_control_manager == NULL) {
+	if (ctx.config.output_names.len > 0 && ctx.xdg_output_manager == NULL) {
+		fprintf(stderr, "compositor doesn't support xdg-output-unstable-v1\n");
+		return EXIT_FAILURE;
+	}
+
+	if (ctx.gamma_control_manager == NULL) {
 		fprintf(stderr, "compositor doesn't support wlr-gamma-control-unstable-v1\n");
 		return EXIT_FAILURE;
 	}
 
 	struct output *output;
 	wl_list_for_each(output, &ctx.outputs, link) {
-		setup_output(output);
+		if (ctx.config.output_names.len > 0) {
+			setup_xdg_output(&ctx, output);
+		}
+		setup_gamma_control(&ctx, output);
 	}
 	wl_display_roundtrip(display);
 
@@ -675,7 +778,8 @@ static int wlrun(struct config cfg) {
 	update_timer(&ctx, ctx.timer, now);
 
 	int temp = get_temperature(&ctx, now);
-	set_temperature(&ctx.outputs, temp, ctx.config.gamma);
+	set_temperature_all_outputs(&ctx.outputs, &ctx.config,
+			temp, ctx.config.gamma);
 
 	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {
@@ -689,12 +793,14 @@ static int wlrun(struct config cfg) {
 			if ((temp = get_temperature(&ctx, now)) != old_temp) {
 				old_temp = temp;
 				ctx.new_output = false;
-				set_temperature(&ctx.outputs, temp,
-						ctx.config.gamma);
+				set_temperature_all_outputs(&ctx.outputs, &ctx.config,
+						temp, ctx.config.gamma);
 			}
 		} else if (ctx.new_output) {
 			ctx.new_output = false;
-			set_temperature(&ctx.outputs, temp, ctx.config.gamma);
+
+			set_temperature_all_outputs(&ctx.outputs, &ctx.config,
+					temp, ctx.config.gamma);
 		}
 	}
 
@@ -719,6 +825,9 @@ static int parse_time_of_day(const char *s, time_t *time) {
 static const char usage[] = "usage: %s [options]\n"
 "  -h             show this help message\n"
 "  -v             show the version number\n"
+"  -o <output>    name of output (display) to use,\n"
+"                 by default all outputs are used\n"
+"                 can be specified multiple times\n"
 "  -t <temp>      set low temperature (default: 4000)\n"
 "  -T <temp>      set high temperature (default: 6500)\n"
 "  -l <lat>       set latitude (e.g. 39.9)\n"
@@ -741,10 +850,15 @@ int main(int argc, char *argv[]) {
 		.low_temp = 4000,
 		.gamma = 1.0,
 	};
+	str_vec_init(&config.output_names);
 
+	int ret = EXIT_FAILURE;
 	int opt;
-	while ((opt = getopt(argc, argv, "hvt:T:l:L:S:s:d:g:")) != -1) {
+	while ((opt = getopt(argc, argv, "hvo:t:T:l:L:S:s:d:g:")) != -1) {
 		switch (opt) {
+			case 'o':
+				str_vec_push(&config.output_names, optarg);
+				break;
 			case 't':
 				config.low_temp = strtol(optarg, NULL, 10);
 				break;
@@ -760,14 +874,14 @@ int main(int argc, char *argv[]) {
 			case 'S':
 				if (parse_time_of_day(optarg, &config.sunrise) != 0) {
 					fprintf(stderr, "invalid time, expected HH:MM, got %s\n", optarg);
-					return EXIT_FAILURE;
+					goto end;
 				}
 				config.manual_time = true;
 				break;
 			case 's':
 				if (parse_time_of_day(optarg, &config.sunset) != 0) {
 					fprintf(stderr, "invalid time, expected HH:MM, got %s\n", optarg);
-					return EXIT_FAILURE;
+					goto end;
 				}
 				config.manual_time = true;
 				break;
@@ -779,38 +893,42 @@ int main(int argc, char *argv[]) {
 				break;
 			case 'v':
 				printf("wlsunset version %s\n", WLSUNSET_VERSION);
-				return EXIT_SUCCESS;
+				ret = EXIT_SUCCESS;
+				goto end;
 			case 'h':
+				ret = EXIT_SUCCESS;
 			default:
 				fprintf(stderr, usage, argv[0]);
-				return opt == 'h' ? EXIT_SUCCESS : EXIT_FAILURE;
+				goto end;
 		}
 	}
 
 	if (config.high_temp <= config.low_temp) {
 		fprintf(stderr, "high temp (%d) must be higher than low (%d) temp\n",
 				config.high_temp, config.low_temp);
-		return EXIT_FAILURE;
+		goto end;
 	}
 	if (config.manual_time) {
 		if (!isnan(config.latitude) || !isnan(config.longitude)) {
 			fprintf(stderr, "latitude and longitude are not valid in manual time mode\n");
-			return EXIT_FAILURE;
+			goto end;
 		}
 	} else {
 		if (config.latitude > 90.0 || config.latitude < -90.0) {
 			fprintf(stderr, "latitude (%lf) must be in interval [-90,90]\n",
 					config.latitude);
-			return EXIT_FAILURE;
+			goto end;
 		}
 		config.latitude = RADIANS(config.latitude);
 		if (config.longitude > 180.0 || config.longitude < -180.0) {
 			fprintf(stderr, "longitude (%lf) must be in interval [-180,180]\n",
 					config.longitude);
-			return EXIT_FAILURE;
+			goto end;
 		}
 		config.longitude = RADIANS(config.longitude);
 	}
-
-	return wlrun(config);
+	ret = wlrun(config);
+end:
+	str_vec_free(&config.output_names);
+	return ret;
 }

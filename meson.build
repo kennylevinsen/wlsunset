@@ -37,8 +37,8 @@ scanner = find_program('wayland-scanner')
 scanner_private_code = generator(scanner, output: '@BASENAME@-protocol.c', arguments: ['private-code', '@INPUT@', '@OUTPUT@'])
 scanner_client_header = generator(scanner, output: '@BASENAME@-client-protocol.h', arguments: ['client-header', '@INPUT@', '@OUTPUT@'])
 
-protocols_src = [scanner_private_code.process('wlr-gamma-control-unstable-v1.xml')]
-protocols_headers = [scanner_client_header.process('wlr-gamma-control-unstable-v1.xml')]
+protocols_src = [scanner_private_code.process('wlr-gamma-control-unstable-v1.xml', 'xdg-output-unstable-v1.xml')]
+protocols_headers = [scanner_client_header.process('wlr-gamma-control-unstable-v1.xml', 'xdg-output-unstable-v1.xml')]
 
 wl_client = dependency('wayland-client')
 wl_protocols = dependency('wayland-protocols')
@@ -51,7 +51,7 @@ rt = cc.find_library('rt')
 
 executable(
 	'wlsunset',
-	['main.c', 'color_math.c'],
+	['main.c', 'color_math.c', 'str_vec.c'],
 	dependencies: [wl_client, protocols_dep, m, rt],
 	install: true,
 )
