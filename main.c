@@ -573,21 +573,19 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw,
 	}
 }
 
-static void set_temperature(struct output *output, double rw,
-		double gw, double bw, double gamma) {
+static void set_temperature(struct output *output, const struct rgb *wp, double gamma) {
 	if (output->gamma_control == NULL || output->table_fd == -1) {
 		return;
 	}
-	fill_gamma_table(output->table, output->ramp_size, rw, gw, bw, gamma);
+	fill_gamma_table(output->table, output->ramp_size, wp->r, wp->g, wp->b, gamma);
 	lseek(output->table_fd, 0, SEEK_SET);
 	zwlr_gamma_control_v1_set_gamma(output->gamma_control,
 			output->table_fd);
 }
 
 static void set_temperature_all_outputs(struct wl_list *outputs,
-		struct config *cfg, int temp, double gamma) {
-	double rw, gw, bw;
-	calc_whitepoint(temp, &rw, &gw, &bw);
+		const struct config *cfg, int temp, double gamma) {
+	struct rgb wp = calc_whitepoint(temp);
 
 	// If outputs specified by user, then set temperature only for them.
 	// Otherwise set temperature for all outputs.
@@ -600,7 +598,7 @@ static void set_temperature_all_outputs(struct wl_list *outputs,
 					fprintf(stderr,
 						"setting temperature on '%s' to %d K\n",
 						output->name, temp);
-					set_temperature(output, rw, gw, bw, gamma);
+					set_temperature(output, &wp, gamma);
 					output_exists = true;
 					break;
 				}
@@ -616,7 +614,7 @@ static void set_temperature_all_outputs(struct wl_list *outputs,
 			fprintf(stderr,
 				"setting temperature on output '%d' to %d K\n",
 				output->id, temp);
-			set_temperature(output, rw, gw, bw, gamma);
+			set_temperature(output, &wp, gamma);
 		}
 	}
 }

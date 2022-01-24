@@ -159,31 +159,32 @@ static double clamp(double value) {
 	}
 }
 
-static void xyz_to_srgb(double x, double y, double z, double *r, double *g, double *b) {
+static struct rgb xyz_to_srgb(const struct xyz *xyz) {
 	// http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
-	*r = srgb_gamma(clamp(3.2404542 * x - 1.5371385 * y - 0.4985314 * z), 2.2);
-	*g = srgb_gamma(clamp(-0.9692660 * x + 1.8760108 * y + 0.0415560 * z), 2.2);
-	*b = srgb_gamma(clamp(0.0556434 * x - 0.2040259 * y + 1.0572252 * z), 2.2);
+	return (struct rgb) {
+		.r = srgb_gamma(clamp(3.2404542 * xyz->x - 1.5371385 * xyz->y - 0.4985314 * xyz->z), 2.2),
+		.g = srgb_gamma(clamp(-0.9692660 * xyz->x + 1.8760108 * xyz->y + 0.0415560 * xyz->z), 2.2),
+		.b = srgb_gamma(clamp(0.0556434 * xyz->x - 0.2040259 * xyz->y + 1.0572252 * xyz->z), 2.2)
+	};
 }
 
-static void srgb_normalize(double *r, double *g, double *b) {
-	double maxw = fmaxl(*r, fmaxl(*g, *b));
-	*r /= maxw;
-	*g /= maxw;
-	*b /= maxw;
+static void srgb_normalize(struct rgb *rgb) {
+	double maxw = fmax(rgb->r, fmax(rgb->g, rgb->b));
+	rgb->r /= maxw;
+	rgb->g /= maxw;
+	rgb->b /= maxw;
 }
 
-void calc_whitepoint(int temp, double *rw, double *gw, double *bw) {
+struct rgb calc_whitepoint(int temp) {
 	if (temp == 6500) {
-		*rw = *gw = *bw = 1.0;
-		return;
+		return (struct rgb) {.r = 1.0, .g = 1.0, .b = 1.0};
 	}
 
-	double x = 1.0, y = 1.0;
+	struct xyz wp;
 	if (temp >= 25000) {
-		illuminant_d(25000, &x, &y);
+		illuminant_d(25000, &wp.x, &wp.y);
 	} else if (temp >= 4000) {
-		illuminant_d(temp, &x, &y);
+		illuminant_d(temp, &wp.x, &wp.y);
 	} else if (temp >= 2500) {
 		double x1, y1, x2, y2;
 		illuminant_d(temp, &x1, &y1);
@@ -191,16 +192,16 @@ void calc_whitepoint(int temp, double *rw, double *gw, double *bw) {
 
 		double factor = (4000 - temp) / 1500;
 		double sinefactor = (cos(M_PI*factor) + 1.0) / 2.0;
-		x = x1 * sinefactor + x2 * (1.0 - sinefactor);
-		y = y1 * sinefactor + y2 * (1.0 - sinefactor);
-	} else if (temp >= 1667) {
-		planckian_locus(temp, &x, &y);
-	} else {
-		planckian_locus(1667, &x, &y);
+		wp.x = x1 * sinefactor + x2 * (1.0 - sinefactor);
+		wp.y = y1 * sinefactor + y2 * (1.0 - sinefactor);
+	} else  {
+		planckian_locus(temp >= 1667 ? temp : 1667, &wp.x, &wp.y);
 	}
-	double z = 1.0 - x - y;
+	wp.z = 1.0 - wp.x - wp.y;
 
-	xyz_to_srgb(x, y, z, rw, gw, bw);
-	srgb_normalize(rw, gw, bw);
+	struct rgb wp_rgb = xyz_to_srgb(&wp);
+	srgb_normalize(&wp_rgb);
+
+	return wp_rgb;
 }
 

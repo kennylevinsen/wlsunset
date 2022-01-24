@@ -22,7 +22,15 @@ struct sun {
 	time_t dusk;
 };
 
+struct rgb {
+  double r, g, b;
+};
+
+struct xyz {
+  double x, y, z;
+};
+
 enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun);
-void calc_whitepoint(int temp, double *rw, double *gw, double *bw);
+struct rgb calc_whitepoint(int temp);
 
 #endif
