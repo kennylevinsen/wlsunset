@@ -138,6 +138,7 @@ struct output {
 	uint32_t id;
 	uint32_t ramp_size;
 	uint16_t *table;
+	bool enabled;
 	char *name;
 };
 
@@ -461,6 +462,15 @@ static void xdg_output_handle_name(void *data,
 	(void)xdg_output;
 	struct output *output = data;
 	output->name = strdup(name);
+
+	struct config *cfg = &output->context->config;
+	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
+		if (strcmp(output->name, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by name\n", output->name);
+			output->enabled = true;
+			return;
+		}
+	}
 }
 
 static void xdg_output_handle_description(void *data,
@@ -516,11 +526,13 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 		output->wl_output = wl_registry_bind(registry, name,
 				&wl_output_interface, 1);
 		output->table_fd = -1;
+		output->enabled = true;
 		output->context = ctx;
 		wl_list_insert(&ctx->outputs, &output->link);
 
 		if (ctx->config.output_names.len > 0) {
 			setup_xdg_output(ctx, output);
+			output->enabled = false;
 		}
 		setup_gamma_control(ctx, output);
 	} else if (ctx->config.output_names.len > 0 && strcmp(interface,
@@ -576,8 +588,8 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw,
 	}
 }
 
-static void set_temperature(struct output *output, const struct rgb *wp, double gamma) {
-	if (output->gamma_control == NULL || output->table_fd == -1) {
+static void output_set_whitepoint(struct output *output, struct rgb *wp, double gamma) {
+	if (!output->enabled || output->gamma_control == NULL || output->table_fd == -1) {
 		return;
 	}
 	fill_gamma_table(output->table, output->ramp_size, wp->r, wp->g, wp->b, gamma);
@@ -586,39 +598,13 @@ static void set_temperature(struct output *output, const struct rgb *wp, double 
 			output->table_fd);
 }
 
-static void set_temperature_all_outputs(struct wl_list *outputs,
-		const struct config *cfg, int temp, double gamma) {
+static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
 	struct rgb wp = calc_whitepoint(temp);
-
-	// If outputs specified by user, then set temperature only for them.
-	// Otherwise set temperature for all outputs.
 	struct output *output;
-	if (cfg->output_names.len > 0) {
-		for (size_t i = 0; i < cfg->output_names.len; ++i) {
-			bool output_exists = false;
-			wl_list_for_each(output, outputs, link) {
-				if (output->name && strcmp(output->name, cfg->output_names.data[i]) == 0) {
-					fprintf(stderr,
-						"setting temperature on '%s' to %d K\n",
-						output->name, temp);
-					set_temperature(output, &wp, gamma);
-					output_exists = true;
-					break;
-				}
-			}
-			if (!output_exists) {
-				fprintf(stderr, "Output '%s' not found!\n",
-						cfg->output_names.data[i]);
-			}
-
-		}
-	} else {
-		wl_list_for_each(output, outputs, link) {
-			fprintf(stderr,
-				"setting temperature on output '%d' to %d K\n",
+	wl_list_for_each(output, outputs, link) {
+		fprintf(stderr, "setting temperature on output '%d' to %d K\n",
 				output->id, temp);
-			set_temperature(output, &wp, gamma);
-		}
+		output_set_whitepoint(output, &wp, gamma);
 	}
 }
 
@@ -779,8 +765,7 @@ static int wlrun(struct config cfg) {
 	update_timer(&ctx, ctx.timer, now);
 
 	int temp = get_temperature(&ctx, now);
-	set_temperature_all_outputs(&ctx.outputs, &ctx.config,
-			temp, ctx.config.gamma);
+	set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 
 	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {
@@ -794,14 +779,12 @@ static int wlrun(struct config cfg) {
 			if ((temp = get_temperature(&ctx, now)) != old_temp) {
 				old_temp = temp;
 				ctx.new_output = false;
-				set_temperature_all_outputs(&ctx.outputs, &ctx.config,
-						temp, ctx.config.gamma);
+				set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 			}
 		} else if (ctx.new_output) {
 			ctx.new_output = false;
 
-			set_temperature_all_outputs(&ctx.outputs, &ctx.config,
-					temp, ctx.config.gamma);
+			set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 		}
 	}
 
