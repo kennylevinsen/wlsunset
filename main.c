@@ -477,6 +477,9 @@ static const struct zxdg_output_v1_listener xdg_output_listener = {
 };
 
 static void setup_xdg_output(struct context *ctx, struct output *output) {
+	if (output->xdg_output != NULL) {
+		return;
+	}
 	if (ctx->xdg_output_manager == NULL) {
 		fprintf(stderr, "skipping setup of output %d: xdg_output_manager is missing\n",
 				output->id);
