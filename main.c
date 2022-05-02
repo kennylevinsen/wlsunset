@@ -82,6 +82,10 @@ static time_t longitude_time_offset(double longitude) {
 	return longitude * 43200 / M_PI;
 }
 
+static int max(int a, int b) {
+	return a > b ? a : b;
+}
+
 struct config {
 	int high_temp;
 	int low_temp;
@@ -241,10 +245,10 @@ done:
 	ctx->condition = cond;
 
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
-	ctx->dawn_step_time = (ctx->sun.sunrise - ctx->sun.dawn) *
-		anim_kelvin_step / temp_diff;
-	ctx->dusk_step_time = (ctx->sun.dusk - ctx->sun.sunset) *
-		anim_kelvin_step / temp_diff;
+	ctx->dawn_step_time = max(1, (ctx->sun.sunrise - ctx->sun.dawn) *
+		anim_kelvin_step / temp_diff);
+	ctx->dusk_step_time = max(1, (ctx->sun.dusk - ctx->sun.sunset) *
+		anim_kelvin_step / temp_diff);
 
 	print_trajectory(ctx);
 }
