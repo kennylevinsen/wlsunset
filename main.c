@@ -88,7 +88,7 @@ static time_t tomorrow(time_t now, time_t offset) {
 }
 
 static time_t longitude_time_offset(double longitude) {
-	return longitude * 43200 / M_PI;
+	return -longitude * 43200 / M_PI;
 }
 
 static int max(int a, int b) {
@@ -185,7 +185,7 @@ static void print_trajectory(struct context *ctx) {
 static int anim_kelvin_step = 25;
 
 static void recalc_stops(struct context *ctx, time_t now) {
-	time_t day = round_day_offset(now, -ctx->longitude_time_offset);
+	time_t day = round_day_offset(now, ctx->longitude_time_offset);
 	if (day == ctx->calc_day) {
 		return;
 	}
@@ -331,7 +331,7 @@ static time_t get_deadline_normal(const struct context *ctx, time_t now) {
 	} else if (now < ctx->sun.dusk) {
 		return now + ctx->dusk_step_time;
 	} else {
-		return tomorrow(now, -ctx->longitude_time_offset);
+		return tomorrow(now, ctx->longitude_time_offset);
 	}
 }
 
@@ -343,7 +343,7 @@ static time_t get_deadline_transition(const struct context *ctx, time_t now) {
 		}
 		// fallthrough
 	case POLAR_NIGHT:
-		return tomorrow(now, -ctx->longitude_time_offset);
+		return tomorrow(now, ctx->longitude_time_offset);
 	default:
 		abort();
 	}
@@ -359,7 +359,7 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 		deadline = get_deadline_transition(ctx, now);
 		break;
 	case STATE_STATIC:
-		deadline = tomorrow(now, -ctx->longitude_time_offset);
+		deadline = tomorrow(now, ctx->longitude_time_offset);
 		break;
 	default:
 		abort();
@@ -737,7 +737,7 @@ static int wlrun(struct config cfg) {
 	if (!cfg.manual_time) {
 		ctx.longitude_time_offset = longitude_time_offset(cfg.longitude);
 	} else {
-		ctx.longitude_time_offset = get_timezone();
+		ctx.longitude_time_offset = -get_timezone();
 	}
 
 	wl_list_init(&ctx.outputs);
