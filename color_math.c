@@ -1,3 +1,5 @@
+#define _USE_MATH_DEFINES
+#define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
 #include <errno.h>

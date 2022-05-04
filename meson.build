@@ -26,8 +26,6 @@ add_project_arguments(
 		'-Wno-unused-command-line-argument',
 		'-Wvla',
 		'-Wl,--exclude-libs=ALL',
-		'-D_USE_MATH_DEFINES',
-		'-D_XOPEN_SOURCE=700',
 		'-DWLSUNSET_VERSION="@0@"'.format(meson.project_version()),
 	],
 	language: 'c',
