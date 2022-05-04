@@ -1,0 +1,12 @@
+image: archlinux
+packages:
+   - meson
+   - wayland
+   - wayland-protocols
+sources:
+   - https://git.sr.ht/~kennylevinsen/wlsunset
+tasks:
+   - build: |
+      meson build wlsunset
+      ninja -C build
+
