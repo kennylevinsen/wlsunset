@@ -72,6 +72,13 @@ static inline void adjust_timerspec(struct itimerspec *timerspec) {
 }
 #endif
 
+static time_t get_timezone(void) {
+	struct tm tm;
+	time_t now = time(NULL);
+	localtime_r(&now, &tm);
+	return tm.tm_gmtoff;
+}
+
 static time_t round_day_offset(time_t now, time_t offset) {
 	return now - ((now - offset) % 86400);
 }
@@ -115,7 +122,7 @@ struct context {
 	struct config config;
 	struct sun sun;
 
-	double longitude_time_offset;
+	time_t longitude_time_offset;
 
 	enum state state;
 	enum sun_condition condition;
@@ -729,6 +736,8 @@ static int wlrun(struct config cfg) {
 
 	if (!cfg.manual_time) {
 		ctx.longitude_time_offset = longitude_time_offset(cfg.longitude);
+	} else {
+		ctx.longitude_time_offset = get_timezone();
 	}
 
 	wl_list_init(&ctx.outputs);
@@ -804,11 +813,6 @@ static int parse_time_of_day(const char *s, time_t *time) {
 		return -1;
 	}
 	*time = tm.tm_hour * 3600 + tm.tm_min * 60;
-#if defined(__FreeBSD__)
-	*time += tm.tm_gmtoff;
-#else
-	*time += timezone;
-#endif
 	return 0;
 }
 
