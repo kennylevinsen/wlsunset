@@ -634,8 +634,10 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 	pfd[1].fd = timer_signal_fds[0];
 
 	pfd[0].events = POLLOUT;
-	while (wl_display_flush(display) == -1) {
-		if (errno != EAGAIN && errno != EPIPE) {
+	// If we hit EPIPE we might have hit a protocol error. Continue reading
+	// so that we can see what happened.
+	while (wl_display_flush(display) == -1 && errno != EPIPE) {
+		if (errno != EAGAIN) {
 			wl_display_cancel_read(display);
 			return -1;
 		}
