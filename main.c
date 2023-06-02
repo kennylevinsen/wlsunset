@@ -116,6 +116,13 @@ enum state {
 	STATE_NORMAL,
 	STATE_TRANSITION,
 	STATE_STATIC,
+	STATE_FORCED,
+};
+
+enum force_state {
+	FORCE_OFF,
+	FORCE_HIGH,
+	FORCE_LOW,
 };
 
 struct context {
@@ -134,6 +141,8 @@ struct context {
 	bool new_output;
 	struct wl_list outputs;
 	timer_t timer;
+
+	enum force_state forced_state;
 
 	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
 	struct zxdg_output_manager_v1 *xdg_output_manager;
@@ -187,6 +196,11 @@ static int anim_kelvin_step = 25;
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = round_day_offset(now, ctx->longitude_time_offset);
 	if (day == ctx->calc_day) {
+		return;
+	}
+
+	if (ctx->forced_state != FORCE_OFF) {
+		ctx->state = STATE_FORCED;
 		return;
 	}
 
@@ -316,6 +330,15 @@ static int get_temperature(const struct context *ctx, time_t now) {
 	case STATE_STATIC:
 		return ctx->condition == MIDNIGHT_SUN ? ctx->config.high_temp :
 			ctx->config.low_temp;
+	case STATE_FORCED:
+		switch (ctx->forced_state) {
+		case FORCE_HIGH:
+			return ctx->config.high_temp;
+		case FORCE_LOW:
+			return ctx->config.low_temp;
+		default:
+			abort();
+		}
 	default:
 		abort();
 	}
@@ -359,6 +382,7 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 		deadline = get_deadline_transition(ctx, now);
 		break;
 	case STATE_STATIC:
+	case STATE_FORCED:
 		deadline = tomorrow(now, ctx->longitude_time_offset);
 		break;
 	default:
@@ -622,7 +646,8 @@ static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
 }
 
 static int timer_fired = 0;
-static int timer_signal_fds[2];
+static int usr1_fired = 0;
+static int signal_fds[2];
 
 static int display_dispatch(struct wl_display *display, int timeout) {
 	if (wl_display_prepare_read(display) == -1) {
@@ -631,7 +656,7 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 
 	struct pollfd pfd[2];
 	pfd[0].fd = wl_display_get_fd(display);
-	pfd[1].fd = timer_signal_fds[0];
+	pfd[1].fd = signal_fds[0];
 
 	pfd[0].events = POLLOUT;
 	// If we hit EPIPE we might have hit a protocol error. Continue reading
@@ -662,10 +687,25 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 
 	if (pfd[1].revents & POLLIN) {
 		// Empty signal fd
-		char garbage[8];
-		if (read(timer_signal_fds[0], &garbage, sizeof garbage) == -1
-				&& errno != EAGAIN) {
+		int signal;
+		int res = read(signal_fds[0], &signal, sizeof signal);
+		if (res == -1) {
+			if (errno != EAGAIN) {
+				return -1;
+			}
+		} else if (res != 4) {
+			fprintf(stderr, "could not read full signal ID\n");
 			return -1;
+		}
+
+		switch (signal) {
+		case SIGALRM:
+			timer_fired = true;
+			break;
+		case SIGUSR1:
+			// do something
+			usr1_fired = true;
+			break;
 		}
 	}
 
@@ -681,10 +721,8 @@ static int display_dispatch(struct wl_display *display, int timeout) {
 	return wl_display_dispatch_pending(display);
 }
 
-static void timer_signal(int signal) {
-	(void)signal;
-	timer_fired = true;
-	if (write(timer_signal_fds[1], "\0", 1) == -1 && errno != EAGAIN) {
+static void signal_handler(int signal) {
+	if (write(signal_fds[1], &signal, sizeof signal) == -1 && errno != EAGAIN) {
 		// This is unfortunate.
 	}
 }
@@ -698,24 +736,29 @@ static int set_nonblock(int fd) {
 	return 0;
 }
 
-static int setup_timer(struct context *ctx) {
-	struct sigaction timer_action = {
-		.sa_handler = timer_signal,
+static int setup_signals(struct context *ctx) {
+	struct sigaction signal_action = {
+		.sa_handler = signal_handler,
 		.sa_flags = 0,
 	};
-	if (pipe(timer_signal_fds) == -1) {
+	if (pipe(signal_fds) == -1) {
 		fprintf(stderr, "could not create signal pipe: %s\n",
 				strerror(errno));
 		return -1;
 	}
-	if (set_nonblock(timer_signal_fds[0]) == -1 ||
-			set_nonblock(timer_signal_fds[1]) == -1) {
+	if (set_nonblock(signal_fds[0]) == -1 ||
+			set_nonblock(signal_fds[1]) == -1) {
 		fprintf(stderr, "could not set nonblock on signal pipe: %s\n",
 				strerror(errno));
 		return -1;
 	}
-	if (sigaction(SIGALRM, &timer_action, NULL) == -1) {
-		fprintf(stderr, "could not configure alarm handler: %s\n",
+	if (sigaction(SIGALRM, &signal_action, NULL) == -1) {
+		fprintf(stderr, "could not configure SIGALRM handler: %s\n",
+				strerror(errno));
+		return -1;
+	}
+	if (sigaction(SIGUSR1, &signal_action, NULL) == -1) {
+		fprintf(stderr, "could not configure SIGUSR1 handler: %s\n",
 				strerror(errno));
 		return -1;
 	}
@@ -744,7 +787,7 @@ static int wlrun(struct config cfg) {
 
 	wl_list_init(&ctx.outputs);
 
-	if (setup_timer(&ctx) == -1) {
+	if (setup_signals(&ctx) == -1) {
 		return EXIT_FAILURE;
 	}
 
@@ -786,9 +829,40 @@ static int wlrun(struct config cfg) {
 
 	int old_temp = temp;
 	while (display_dispatch(display, -1) != -1) {
+		if (ctx.new_output) {
+			ctx.new_output = false;
+
+			// Force set_temperature
+			old_temp = 0;
+			timer_fired = true;
+		}
+
+		if (usr1_fired) {
+			usr1_fired = false;
+			switch (ctx.forced_state) {
+			case FORCE_OFF:
+				ctx.forced_state = FORCE_HIGH;
+				fprintf(stderr, "forcing high temperature\n");
+				break;
+			case FORCE_HIGH:
+				ctx.forced_state = FORCE_LOW;
+				fprintf(stderr, "forcing low temperature\n");
+				break;
+			case FORCE_LOW:
+				ctx.forced_state = FORCE_OFF;
+				fprintf(stderr, "disabling forced temperature\n");
+				break;
+			default:
+				abort();
+			}
+
+			// Force re-calculation
+			ctx.calc_day = 0;
+			timer_fired = true;
+		}
+
 		if (timer_fired) {
 			timer_fired = false;
-
 			now = get_time_sec();
 			recalc_stops(&ctx, now);
 			update_timer(&ctx, ctx.timer, now);
@@ -798,10 +872,6 @@ static int wlrun(struct config cfg) {
 				ctx.new_output = false;
 				set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 			}
-		} else if (ctx.new_output) {
-			ctx.new_output = false;
-
-			set_temperature(&ctx.outputs, temp, ctx.config.gamma);
 		}
 	}
 

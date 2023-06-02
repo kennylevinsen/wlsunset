@@ -40,6 +40,14 @@ wlr-gamma-control-unstable-v1
 *-g* <gamma>
 	set gamma (default: 1.0)
 
+# RUNTIME CONTROL
+
+Sending SIGUSR1 to wlsunset causes it to cycle through the following modes:
+
+1. Forcing use of the high temperature
+2. Forcing use of the low temperature
+3. Automatic temperature calculation
+
 # EXAMPLE
 
 ```
