@@ -16,7 +16,6 @@
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
 
-#include "xdg-output-unstable-v1-client-protocol.h"
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "color_math.h"
 #include "str_vec.h"
@@ -145,7 +144,6 @@ struct context {
 	enum force_state forced_state;
 
 	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
-	struct zxdg_output_manager_v1 *xdg_output_manager;
 };
 
 struct output {
@@ -153,7 +151,6 @@ struct output {
 
 	struct context *context;
 	struct wl_output *wl_output;
-	struct zxdg_output_v1 *xdg_output;
 	struct zwlr_gamma_control_v1 *gamma_control;
 
 	int table_fd;
@@ -162,6 +159,7 @@ struct output {
 	uint16_t *table;
 	bool enabled;
 	char *name;
+	char *description;
 };
 
 static void print_trajectory(struct context *ctx) {
@@ -401,6 +399,62 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
 }
 
+static void wl_output_handle_geometry(void *data, struct wl_output *output, int x, int y, int width,
+				      int height, int subpixel, const char *make, const char *model,
+				      int transform) {
+	(void)data, (void)output, (void)x, (void)y, (void)width, (void)height, (void)subpixel,
+		(void)make, (void)model, (void)transform;
+}
+
+static void wl_output_handle_mode(void *data, struct wl_output *output, uint32_t flags, int width,
+				  int height, int refresh) {
+	(void)data, (void)output, (void)flags, (void)width, (void)height, (void)refresh;
+}
+
+static void wl_output_handle_done(void *data, struct wl_output *output) {
+	(void)data, (void)output;
+}
+
+static void wl_output_handle_scale(void *data, struct wl_output *output, int scale) {
+	(void)data, (void)output, (void)scale;
+}
+
+static void wl_output_handle_name(void *data, struct wl_output *wl_output, const char *name) {
+	(void)wl_output;
+	struct output *output = data;
+	output->name = strdup(name);
+	struct config *cfg = &output->context->config;
+	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
+		if (strcmp(output->name, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by name\n", output->name);
+			output->enabled = true;
+			return;
+		}
+	}
+}
+
+static void wl_output_handle_description(void *data, struct wl_output *wl_output, const char *description) {
+	(void)wl_output;
+	struct output *output = data;
+	output->description = strdup(description);
+	struct config *cfg = &output->context->config;
+	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
+		if (strcmp(output->description, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by description\n", output->description);
+			output->enabled = true;
+			return;
+		}
+	}
+}
+
+struct wl_output_listener wl_output_listener = {
+	.geometry = wl_output_handle_geometry,
+	.mode = wl_output_handle_mode,
+	.done = wl_output_handle_done,
+	.scale = wl_output_handle_scale,
+	.name = wl_output_handle_name,
+	.description = wl_output_handle_description,
+};
 
 static int create_anonymous_file(off_t size) {
 	char template[] = "/tmp/wlsunset-shared-XXXXXX";
@@ -479,64 +533,6 @@ static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
 	.failed = gamma_control_handle_failed,
 };
 
-static void xdg_output_handle_logical_position(void *data,
-		struct zxdg_output_v1 *xdg_output, int32_t x, int32_t y) {
-	(void)data, (void)xdg_output, (void)x, (void)y;
-}
-
-static void xdg_output_handle_logical_size(void *data,
-		struct zxdg_output_v1 *xdg_output, int32_t width, int32_t height) {
-	(void)data, (void)xdg_output, (void)width, (void)height;
-}
-
-static void xdg_output_handle_done(void *data,
-		struct zxdg_output_v1 *xdg_output) {
-	(void)data, (void)xdg_output;
-}
-
-static void xdg_output_handle_name(void *data,
-		struct zxdg_output_v1 *xdg_output, const char *name) {
-	(void)xdg_output;
-	struct output *output = data;
-	output->name = strdup(name);
-
-	struct config *cfg = &output->context->config;
-	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
-		if (strcmp(output->name, cfg->output_names.data[idx]) == 0) {
-			fprintf(stderr, "enabling output %s by name\n", output->name);
-			output->enabled = true;
-			return;
-		}
-	}
-}
-
-static void xdg_output_handle_description(void *data,
-		struct zxdg_output_v1 *xdg_output, const char *description) {
-	(void)data, (void)xdg_output, (void)description;
-}
-
-static const struct zxdg_output_v1_listener xdg_output_listener = {
-	.logical_position = xdg_output_handle_logical_position,
-	.logical_size = xdg_output_handle_logical_size,
-	.done = xdg_output_handle_done,
-	.name = xdg_output_handle_name,
-	.description = xdg_output_handle_description,
-};
-
-static void setup_xdg_output(struct context *ctx, struct output *output) {
-	if (output->xdg_output != NULL) {
-		return;
-	}
-	if (ctx->xdg_output_manager == NULL) {
-		fprintf(stderr, "skipping setup of output %d: xdg_output_manager is missing\n",
-				output->id);
-		return;
-	}
-	output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-		ctx->xdg_output_manager, output->wl_output);
-	zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
-}
-
 static void setup_gamma_control(struct context *ctx, struct output *output) {
 	if (output->gamma_control != NULL) {
 		return;
@@ -558,24 +554,27 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 	struct context *ctx = (struct context *)data;
 	if (strcmp(interface, wl_output_interface.name) == 0) {
 		fprintf(stderr, "registry: adding output %d\n", name);
+
 		struct output *output = calloc(1, sizeof(struct output));
 		output->id = name;
-		output->wl_output = wl_registry_bind(registry, name,
-				&wl_output_interface, 1);
 		output->table_fd = -1;
-		output->enabled = true;
 		output->context = ctx;
-		wl_list_insert(&ctx->outputs, &output->link);
 
-		if (ctx->config.output_names.len > 0) {
-			setup_xdg_output(ctx, output);
-			output->enabled = false;
+		if (version >= WL_OUTPUT_NAME_SINCE_VERSION) {
+			output->enabled = ctx->config.output_names.len == 0;
+			output->wl_output = wl_registry_bind(registry, name,
+					&wl_output_interface, WL_OUTPUT_NAME_SINCE_VERSION);
+			wl_output_add_listener(output->wl_output, &wl_output_listener, output);
+		} else {
+			fprintf(stderr, "wl_output: old version (%d < %d), disabling name support\n",
+					version, WL_OUTPUT_NAME_SINCE_VERSION);
+			output->enabled = true;
+			output->wl_output = wl_registry_bind(registry, name,
+					&wl_output_interface, version);
 		}
+
+		wl_list_insert(&ctx->outputs, &output->link);
 		setup_gamma_control(ctx, output);
-	} else if (ctx->config.output_names.len > 0 && strcmp(interface,
-			zxdg_output_manager_v1_interface.name) == 0) {
-		ctx->xdg_output_manager = wl_registry_bind(registry, name,
-				&zxdg_output_manager_v1_interface, version);
 	} else if (strcmp(interface,
 				zwlr_gamma_control_manager_v1_interface.name) == 0) {
 		ctx->gamma_control_manager = wl_registry_bind(registry, name,
@@ -592,9 +591,6 @@ static void registry_handle_global_remove(void *data,
 		if (output->id == name) {
 			fprintf(stderr, "registry: removing output %d\n", name);
 			wl_list_remove(&output->link);
-			if (output->xdg_output != NULL) {
-				zxdg_output_v1_destroy(output->xdg_output);
-			}
 			if (output->gamma_control != NULL) {
 				zwlr_gamma_control_v1_destroy(output->gamma_control);
 			}
@@ -801,11 +797,6 @@ static int wlrun(struct config cfg) {
 	wl_registry_add_listener(registry, &registry_listener, &ctx);
 	wl_display_roundtrip(display);
 
-	if (ctx.config.output_names.len > 0 && ctx.xdg_output_manager == NULL) {
-		fprintf(stderr, "compositor doesn't support xdg-output-unstable-v1\n");
-		return EXIT_FAILURE;
-	}
-
 	if (ctx.gamma_control_manager == NULL) {
 		fprintf(stderr, "compositor doesn't support wlr-gamma-control-unstable-v1\n");
 		return EXIT_FAILURE;
@@ -813,9 +804,6 @@ static int wlrun(struct config cfg) {
 
 	struct output *output;
 	wl_list_for_each(output, &ctx.outputs, link) {
-		if (ctx.config.output_names.len > 0) {
-			setup_xdg_output(&ctx, output);
-		}
 		setup_gamma_control(&ctx, output);
 	}
 	wl_display_roundtrip(display);
