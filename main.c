@@ -191,7 +191,7 @@ static void print_trajectory(struct context *ctx) {
 	}
 }
 
-static int anim_kelvin_step = 25;
+static int anim_kelvin_step = 10;
 
 static void recalc_stops(struct context *ctx, time_t now) {
 	time_t day = round_day_offset(now, ctx->longitude_time_offset);
