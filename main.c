@@ -159,7 +159,6 @@ struct output {
 	uint16_t *table;
 	bool enabled;
 	char *name;
-	char *description;
 };
 
 static void print_trajectory(struct context *ctx) {
@@ -530,11 +529,10 @@ static void wl_output_handle_name(void *data, struct wl_output *wl_output, const
 static void wl_output_handle_description(void *data, struct wl_output *wl_output, const char *description) {
 	(void)wl_output;
 	struct output *output = data;
-	output->description = strdup(description);
 	struct config *cfg = &output->context->config;
 	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
-		if (strcmp(output->description, cfg->output_names.data[idx]) == 0) {
-			fprintf(stderr, "enabling output %s by description\n", output->description);
+		if (strcmp(description, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by description\n", description);
 			output->enabled = true;
 			return;
 		}
@@ -592,6 +590,7 @@ static void registry_handle_global_remove(void *data,
 	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
 		if (output->id == name) {
 			fprintf(stderr, "registry: removing output %s (%d)\n", output->name, name);
+			free(output->name);
 			wl_list_remove(&output->link);
 			if (output->gamma_control != NULL) {
 				zwlr_gamma_control_v1_destroy(output->gamma_control);
