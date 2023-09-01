@@ -399,63 +399,6 @@ static void update_timer(const struct context *ctx, timer_t timer, time_t now) {
 	timer_settime(timer, TIMER_ABSTIME, &timerspec, NULL);
 }
 
-static void wl_output_handle_geometry(void *data, struct wl_output *output, int x, int y, int width,
-				      int height, int subpixel, const char *make, const char *model,
-				      int transform) {
-	(void)data, (void)output, (void)x, (void)y, (void)width, (void)height, (void)subpixel,
-		(void)make, (void)model, (void)transform;
-}
-
-static void wl_output_handle_mode(void *data, struct wl_output *output, uint32_t flags, int width,
-				  int height, int refresh) {
-	(void)data, (void)output, (void)flags, (void)width, (void)height, (void)refresh;
-}
-
-static void wl_output_handle_done(void *data, struct wl_output *output) {
-	(void)data, (void)output;
-}
-
-static void wl_output_handle_scale(void *data, struct wl_output *output, int scale) {
-	(void)data, (void)output, (void)scale;
-}
-
-static void wl_output_handle_name(void *data, struct wl_output *wl_output, const char *name) {
-	(void)wl_output;
-	struct output *output = data;
-	output->name = strdup(name);
-	struct config *cfg = &output->context->config;
-	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
-		if (strcmp(output->name, cfg->output_names.data[idx]) == 0) {
-			fprintf(stderr, "enabling output %s by name\n", output->name);
-			output->enabled = true;
-			return;
-		}
-	}
-}
-
-static void wl_output_handle_description(void *data, struct wl_output *wl_output, const char *description) {
-	(void)wl_output;
-	struct output *output = data;
-	output->description = strdup(description);
-	struct config *cfg = &output->context->config;
-	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
-		if (strcmp(output->description, cfg->output_names.data[idx]) == 0) {
-			fprintf(stderr, "enabling output %s by description\n", output->description);
-			output->enabled = true;
-			return;
-		}
-	}
-}
-
-struct wl_output_listener wl_output_listener = {
-	.geometry = wl_output_handle_geometry,
-	.mode = wl_output_handle_mode,
-	.done = wl_output_handle_done,
-	.scale = wl_output_handle_scale,
-	.name = wl_output_handle_name,
-	.description = wl_output_handle_description,
-};
-
 static int create_anonymous_file(off_t size) {
 	char template[] = "/tmp/wlsunset-shared-XXXXXX";
 	int fd = mkstemp(template);
@@ -508,8 +451,8 @@ static void gamma_control_handle_gamma_size(void *data,
 	output->table_fd = create_gamma_table(ramp_size, &output->table);
 	output->context->new_output = true;
 	if (output->table_fd < 0) {
-		fprintf(stderr, "could not create gamma table for output %d\n",
-				output->id);
+		fprintf(stderr, "could not create gamma table for output %s (%d)\n",
+				output->name, output->id);
 		exit(EXIT_FAILURE);
 	}
 }
@@ -518,8 +461,8 @@ static void gamma_control_handle_failed(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control) {
 	(void)gamma_control;
 	struct output *output = data;
-	fprintf(stderr, "gamma control of output %d failed\n",
-			output->id);
+	fprintf(stderr, "gamma control of output %s (%d) failed\n",
+			output->name, output->id);
 	zwlr_gamma_control_v1_destroy(output->gamma_control);
 	output->gamma_control = NULL;
 	if (output->table_fd != -1) {
@@ -538,8 +481,8 @@ static void setup_gamma_control(struct context *ctx, struct output *output) {
 		return;
 	}
 	if (ctx->gamma_control_manager == NULL) {
-		fprintf(stderr, "skipping setup of output %d: gamma_control_manager missing\n",
-				output->id);
+		fprintf(stderr, "skipping setup of output %s (%d): gamma_control_manager missing\n",
+				output->name, output->id);
 		return;
 	}
 	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
@@ -547,6 +490,65 @@ static void setup_gamma_control(struct context *ctx, struct output *output) {
 	zwlr_gamma_control_v1_add_listener(output->gamma_control,
 		&gamma_control_listener, output);
 }
+
+static void wl_output_handle_geometry(void *data, struct wl_output *output, int x, int y, int width,
+				      int height, int subpixel, const char *make, const char *model,
+				      int transform) {
+	(void)data, (void)output, (void)x, (void)y, (void)width, (void)height, (void)subpixel,
+		(void)make, (void)model, (void)transform;
+}
+
+static void wl_output_handle_mode(void *data, struct wl_output *output, uint32_t flags, int width,
+				  int height, int refresh) {
+	(void)data, (void)output, (void)flags, (void)width, (void)height, (void)refresh;
+}
+
+static void wl_output_handle_done(void *data, struct wl_output *wl_output) {
+	(void)wl_output;
+	struct output *output = data;
+	setup_gamma_control(output->context, output);
+}
+
+static void wl_output_handle_scale(void *data, struct wl_output *output, int scale) {
+	(void)data, (void)output, (void)scale;
+}
+
+static void wl_output_handle_name(void *data, struct wl_output *wl_output, const char *name) {
+	(void)wl_output;
+	struct output *output = data;
+	output->name = strdup(name);
+	struct config *cfg = &output->context->config;
+	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
+		if (strcmp(output->name, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by name\n", output->name);
+			output->enabled = true;
+			return;
+		}
+	}
+}
+
+static void wl_output_handle_description(void *data, struct wl_output *wl_output, const char *description) {
+	(void)wl_output;
+	struct output *output = data;
+	output->description = strdup(description);
+	struct config *cfg = &output->context->config;
+	for (size_t idx = 0; idx < cfg->output_names.len; ++idx) {
+		if (strcmp(output->description, cfg->output_names.data[idx]) == 0) {
+			fprintf(stderr, "enabling output %s by description\n", output->description);
+			output->enabled = true;
+			return;
+		}
+	}
+}
+
+struct wl_output_listener wl_output_listener = {
+	.geometry = wl_output_handle_geometry,
+	.mode = wl_output_handle_mode,
+	.done = wl_output_handle_done,
+	.scale = wl_output_handle_scale,
+	.name = wl_output_handle_name,
+	.description = wl_output_handle_description,
+};
 
 static void registry_handle_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version) {
@@ -571,10 +573,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 			output->enabled = true;
 			output->wl_output = wl_registry_bind(registry, name,
 					&wl_output_interface, version);
+			setup_gamma_control(ctx, output);
 		}
 
 		wl_list_insert(&ctx->outputs, &output->link);
-		setup_gamma_control(ctx, output);
 	} else if (strcmp(interface,
 				zwlr_gamma_control_manager_v1_interface.name) == 0) {
 		ctx->gamma_control_manager = wl_registry_bind(registry, name,
@@ -589,7 +591,7 @@ static void registry_handle_global_remove(void *data,
 	struct output *output, *tmp;
 	wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
 		if (output->id == name) {
-			fprintf(stderr, "registry: removing output %d\n", name);
+			fprintf(stderr, "registry: removing output %s (%d)\n", output->name, name);
 			wl_list_remove(&output->link);
 			if (output->gamma_control != NULL) {
 				zwlr_gamma_control_v1_destroy(output->gamma_control);
@@ -635,8 +637,8 @@ static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
 	struct rgb wp = calc_whitepoint(temp);
 	struct output *output;
 	wl_list_for_each(output, outputs, link) {
-		fprintf(stderr, "setting temperature on output '%d' to %d K\n",
-				output->id, temp);
+		fprintf(stderr, "setting temperature on output %s (%d) to %d K\n",
+				output->name, output->id, temp);
 		output_set_whitepoint(output, &wp, gamma);
 	}
 }
