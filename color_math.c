@@ -192,7 +192,7 @@ struct rgb calc_whitepoint(int temp) {
 		illuminant_d(temp, &x1, &y1);
 		planckian_locus(temp, &x2, &y2);
 
-		double factor = (4000 - temp) / 1500;
+		double factor = (4000. - temp) / 1500.;
 		double sinefactor = (cos(M_PI*factor) + 1.0) / 2.0;
 		wp.x = x1 * sinefactor + x2 * (1.0 - sinefactor);
 		wp.y = y1 * sinefactor + y2 * (1.0 - sinefactor);
