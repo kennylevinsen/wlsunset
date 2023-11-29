@@ -2,7 +2,7 @@ wlsunset(1)
 
 # NAME
 
-wlsunet - Day/night gamma adjustments for Wayland compositors supporting
+wlsunset - Day/night gamma adjustments for Wayland compositors supporting
 wlr-gamma-control-unstable-v1
 
 # SYNOPSIS
