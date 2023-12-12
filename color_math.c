@@ -75,8 +75,13 @@ enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun) {
 
 /*
  * Illuminant D, or daylight locus, is is a "standard illuminant" used to
- * describe natural daylight. It is on this locus that D65, the whitepoint used
- * by most monitors and assumed by wlsunset, is defined.
+ * describe natural daylight as we perceive it, and as such is how we expect
+ * bright, cold white light sources to look. This is different from the
+ * planckian locus due to the effects of the atmosphere on sunlight travelling
+ * through it.
+ *
+ * It is on this locus that D65, the whitepoint used by most monitors and
+ * assumed by display servers, is defined.
  *
  * This approximation is strictly speaking only well-defined between 4000K and
  * 25000K, but we stretch it a bit further down for transition purposes.
@@ -103,9 +108,14 @@ static int illuminant_d(int temp, double *x, double *y) {
 
 /*
  * Planckian locus, or black body locus, describes the color of a black body at
- * a certain temperatures. This is not entirely equivalent to daylight due to
- * atmospheric effects.
+ * a certain temperatures directly at its source, rather than observed through
+ * a thick atmosphere.
  *
+ * While we are used to bright light coming from afar and going through the
+ * atmosphere, we are used to seeing dim incandescent light sources from close
+ * enough for the atmosphere to not affect its perception, dictating how we
+ * expect dim, warm light sources to look.
+  *
  * This approximation is only valid from 1667K to 25000K.
  */
 static int planckian_locus(int temp, double *x, double *y) {
@@ -181,6 +191,16 @@ struct rgb calc_whitepoint(int temp) {
 	if (temp == 6500) {
 		return (struct rgb) {.r = 1.0, .g = 1.0, .b = 1.0};
 	}
+
+	// We are not trying to calculate the accurate whitepoint, but rather
+	// an expected observed whitepoint. We generally expect dim and warm
+	// light sources to follow the planckian locus, while we expect bright
+	// and cold light sources to follow the daylight locus. There is no
+	// "correct" way to transition between these two curves, and so the
+	// goal is purely to be subjectively pleasant/non-jarring.
+	//
+	// A smooth transition between the two in the range between 2500K and
+	// 4000K seems to do the trick for now.
 
 	struct xyz wp;
 	if (temp >= 25000) {
