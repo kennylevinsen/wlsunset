@@ -1,6 +1,6 @@
 # wlsunset
 
-Day/night gamma adjustments for Wayland compositors supporting `wlr-gamma-control-unstable-v1` & `xdg-output-unstable-v1`.
+Day/night gamma adjustments for Wayland compositors supporting `wlr-gamma-control-unstable-v1`.
 
 # How to build and install
 
