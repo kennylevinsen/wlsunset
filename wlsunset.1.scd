@@ -2,7 +2,7 @@ wlsunset(1)
 
 # NAME
 
-wlsunset - Day/night gamma adjustments for Wayland compositors supporting
+wlsunset - day/night gamma adjustments for Wayland compositors supporting
 wlr-gamma-control-unstable-v1
 
 # SYNOPSIS
@@ -12,33 +12,33 @@ wlr-gamma-control-unstable-v1
 # OPTIONS
 
 *-h*
-	show this help message
+	Show this help message.
 
 *-T* <temp>
-	set high temperature (default: 6500)
+	Set high temperature (default: 6500).
 
 *-t* <temp>
-	set low temperature (default: 4000)
+	Set low temperature (default: 4000).
 
 *-l* <lat>
-	set latitude (e.g. 39.9)
+	Set latitude (e.g. 39.9).
 
 *-L* <long>
-	set longitude (e.g. 116.3)
+	Set longitude (e.g. 116.3).
 
 *-S* <sunrise>
-	Manual time for sunrise as HH:MM (e.g. 06:30)
+	Manual time for sunrise as HH:MM (e.g. 06:30).
 
 *-s* <sunset>
-	Manual time for sunset as HH:MM (e.g. 18:30)
+	Manual time for sunset as HH:MM (e.g. 18:30).
 
 *-d* <duration>
-	Manual animation time in seconds (e.g. 1800)
+	Manual animation time in seconds (e.g. 1800).
 
 	Only applicable when using manual sunset/sunrise times.
 
 *-g* <gamma>
-	set gamma (default: 1.0)
+	Set gamma (default: 1.0).
 
 # RUNTIME CONTROL
 
