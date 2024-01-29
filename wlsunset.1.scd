@@ -44,9 +44,11 @@ wlr-gamma-control-unstable-v1
 
 Sending SIGUSR1 to wlsunset causes it to cycle through the following modes:
 
-1. Forcing use of the high temperature
-2. Forcing use of the low temperature
-3. Automatic temperature calculation
+1. Forced use of the high temperature.
+
+2. Forced use of the low temperature.
+
+3. Automatic temperature calculation, the default behavior.
 
 # EXAMPLE
 
