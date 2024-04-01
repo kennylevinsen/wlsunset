@@ -443,9 +443,17 @@ static void gamma_control_handle_gamma_size(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control, uint32_t ramp_size) {
 	(void)gamma_control;
 	struct output *output = data;
-	output->ramp_size = ramp_size;
 	if (output->table_fd != -1) {
 		close(output->table_fd);
+		output->table_fd = -1;
+	}
+	output->ramp_size = ramp_size;
+	if (ramp_size == 0) {
+		// Maybe the output does not currently have a CRTC to tell us
+		// the gamma size, let's clean up and retry on next set.
+		zwlr_gamma_control_v1_destroy(output->gamma_control);
+		output->gamma_control = NULL;
+		return;
 	}
 	output->table_fd = create_gamma_table(ramp_size, &output->table);
 	output->context->new_output = true;
@@ -635,9 +643,13 @@ static void output_set_whitepoint(struct output *output, struct rgb *wp, double 
 static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
 	struct rgb wp = calc_whitepoint(temp);
 	struct output *output;
+	fprintf(stderr, "setting temperature to %d K\n", temp);
+
 	wl_list_for_each(output, outputs, link) {
-		fprintf(stderr, "setting temperature on output %s (%d) to %d K\n",
-				output->name, output->id, temp);
+		if (output->gamma_control == NULL) {
+			setup_gamma_control(output->context, output);
+			continue;
+		}
 		output_set_whitepoint(output, &wp, gamma);
 	}
 }
