@@ -19,7 +19,7 @@ struct sun {
 	time_t dawn;
 	time_t sunrise;
 	time_t sunset;
-	time_t dusk;
+	time_t night;
 };
 
 struct rgb {

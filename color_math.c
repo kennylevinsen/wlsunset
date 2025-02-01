@@ -63,7 +63,7 @@ enum sun_condition calc_sun(struct tm *tm, double latitude,
 	double ha_daylight = sun_hour_angle(latitude, decl, elevation_daylight);
 
 	sun->dawn = hour_angle_to_time(fabs(ha_twilight), eqtime);
-	sun->dusk = hour_angle_to_time(-fabs(ha_twilight), eqtime);
+	sun->night = hour_angle_to_time(-fabs(ha_twilight), eqtime);
 	sun->sunrise = hour_angle_to_time(fabs(ha_daylight), eqtime);
 	sun->sunset = hour_angle_to_time(-fabs(ha_daylight), eqtime);
 

@@ -137,7 +137,7 @@ struct context {
 	enum sun_condition condition;
 
 	time_t dawn_step_time;
-	time_t dusk_step_time;
+	time_t night_step_time;
 	time_t calc_day;
 
 	bool new_output;
@@ -166,19 +166,19 @@ struct output {
 
 static void print_trajectory(struct context *ctx) {
 	fprintf(stderr, "calculated sun trajectory: ");
-	struct tm dawn, sunrise, sunset, dusk;
+	struct tm dawn, sunrise, sunset, night;
 	switch (ctx->condition) {
 	case NORMAL:
 		localtime_r(&ctx->sun.dawn, &dawn);
 		localtime_r(&ctx->sun.sunrise, &sunrise);
 		localtime_r(&ctx->sun.sunset, &sunset);
-		localtime_r(&ctx->sun.dusk, &dusk);
+		localtime_r(&ctx->sun.night, &night);
 		fprintf(stderr,
-			"dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, dusk %02d:%02d\n",
+			"dawn %02d:%02d, sunrise %02d:%02d, sunset %02d:%02d, night %02d:%02d\n",
 			dawn.tm_hour, dawn.tm_min,
 			sunrise.tm_hour, sunrise.tm_min,
 			sunset.tm_hour, sunset.tm_min,
-			dusk.tm_hour, dusk.tm_min);
+			night.tm_hour, night.tm_min);
 		break;
 	case MIDNIGHT_SUN:
 		fprintf(stderr, "midnight sun\n");
@@ -214,7 +214,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 		ctx->sun.dawn = ctx->config.sunrise - ctx->config.duration + day;
 		ctx->sun.sunrise = ctx->config.sunrise + day;
 		ctx->sun.sunset = ctx->config.sunset + day;
-		ctx->sun.dusk = ctx->config.sunset + ctx->config.duration + day;
+		ctx->sun.night = ctx->config.sunset + ctx->config.duration + day;
 
 		goto done;
 	}
@@ -230,7 +230,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 		ctx->sun.dawn = sun.dawn + day;
 		ctx->sun.sunrise = sun.sunrise + day;
 		ctx->sun.sunset = sun.sunset + day;
-		ctx->sun.dusk = sun.dusk + day;
+		ctx->sun.night = sun.night + day;
 
 		if (ctx->condition == MIDNIGHT_SUN) {
 			// Yesterday had no sunset, so remove our sunrise.
@@ -270,7 +270,7 @@ done:
 	int temp_diff = ctx->config.high_temp - ctx->config.low_temp;
 	ctx->dawn_step_time = max(1, (ctx->sun.sunrise - ctx->sun.dawn) *
 		anim_kelvin_step / temp_diff);
-	ctx->dusk_step_time = max(1, (ctx->sun.dusk - ctx->sun.sunset) *
+	ctx->night_step_time = max(1, (ctx->sun.night - ctx->sun.sunset) *
 		anim_kelvin_step / temp_diff);
 
 	print_trajectory(ctx);
@@ -300,9 +300,9 @@ static int get_temperature_normal(const struct context *ctx, time_t now) {
 				ctx->config.high_temp);
 	} else if (now < ctx->sun.sunset) {
 		return ctx->config.high_temp;
-	} else if (now < ctx->sun.dusk) {
+	} else if (now < ctx->sun.night) {
 		return interpolate_temperature(now, ctx->sun.sunset,
-				ctx->sun.dusk, ctx->config.high_temp,
+				ctx->sun.night, ctx->config.high_temp,
 				ctx->config.low_temp);
 	} else {
 		return ctx->config.low_temp;
@@ -351,8 +351,8 @@ static time_t get_deadline_normal(const struct context *ctx, time_t now) {
 		return now + ctx->dawn_step_time;
 	} else if (now < ctx->sun.sunset) {
 		return ctx->sun.sunset;
-	} else if (now < ctx->sun.dusk) {
-		return now + ctx->dusk_step_time;
+	} else if (now < ctx->sun.night) {
+		return now + ctx->night_step_time;
 	} else {
 		return tomorrow(now, ctx->longitude_time_offset);
 	}
