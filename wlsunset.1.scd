@@ -73,6 +73,31 @@ The point of transition can be controlled by changing the configured solar
 elevation thresholds with *-E* and *-e*. It is also possible to use a manually
 set time of transition using `*S*, *-s* and *-d*.
 
+# COLOR TEMPERATURE
+
+Color temperature refers to the color of light emitted by an object (a black
+body) when it is heated to a certain temperature. The color follows a curve
+known as the Planckian locus, and the color of, for example, candle light or
+incandescent light follows this curve.
+
+Daylight is subject to atmospheric effects that cause the color of light to
+shift significantly. To model daylight, a curve known as Illuminant D, or
+daylight locus, is used. D65, a common white point, lies on this curve.
+
+When we transition from a high color temperature to a low color temperature, we
+are trying to ressemble a change from daylight to incandescent or candle light
+to match the type of light we are used to seeing in a particular environment.
+This means that we must work with both curves, as using only one or the other
+would lead to unexpected and jarring color tints.
+
+To handle this, wlsunset deploys the following strategy:
+1. Below 2500 kelvin, the Planckian locus is used as is.
+2. At or above 2500 kelvin, but below 4000 kelvin, a smooth transition between
+the values on the Planckian locus and the values on the daylight locus is used.
+3. Above 4000 kelvin, the daylight locus is used as is.
+
+The slow transition hides the change reasonably well.
+
 # RUNTIME CONTROL
 
 Sending SIGUSR1 to wlsunset causes it to cycle through the following modes:
