@@ -14,6 +14,11 @@ wlr-gamma-control-unstable-v1
 *-h*
 	Show this help message.
 
+*-o* <output>
+	If set, disables automatic control of all outputs and instead specifies
+	the name of an invididual outputs that should be controlled. Can be
+	specified multiple times to control multiple outputs.
+
 *-T* <temp>
 	Set high temperature (default: 6500).
 
