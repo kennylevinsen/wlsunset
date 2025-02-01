@@ -107,6 +107,9 @@ struct config {
 	time_t sunset;
 	time_t duration;
 
+	double elevation_twilight;
+	double elevation_daylight;
+
 	struct str_vec output_names;
 };
 
@@ -219,7 +222,7 @@ static void recalc_stops(struct context *ctx, time_t now) {
 	struct sun sun;
 	struct tm tm = { 0 };
 	gmtime_r(&day, &tm);
-	cond = calc_sun(&tm, ctx->config.latitude, &sun);
+	cond = calc_sun(&tm, ctx->config.latitude, ctx->config.elevation_twilight, ctx->config.elevation_daylight, &sun);
 
 	switch (cond) {
 	case NORMAL:
@@ -899,6 +902,8 @@ static const char usage[] = "usage: %s [options]\n"
 "  -T <temp>      set high temperature (default: 6500)\n"
 "  -l <lat>       set latitude (e.g. 39.9)\n"
 "  -L <long>      set longitude (e.g. 116.3)\n"
+"  -E <elevation> set solar elevation for daylight transition (default: 3.0)\n"
+"  -e <elevation> set solar elevation for twilight transition (default: -6.0)\n"
 "  -S <sunrise>   set manual sunrise (e.g. 06:30)\n"
 "  -s <sunset>    set manual sunset (e.g. 18:30)\n"
 "  -d <duration>  set manual duration in seconds (e.g. 1800)\n"
@@ -916,12 +921,14 @@ int main(int argc, char *argv[]) {
 		.high_temp = 6500,
 		.low_temp = 4000,
 		.gamma = 1.0,
+		.elevation_daylight = 3.0,
+		.elevation_twilight = -6.0,
 	};
 	str_vec_init(&config.output_names);
 
 	int ret = EXIT_FAILURE;
 	int opt;
-	while ((opt = getopt(argc, argv, "hvo:t:T:l:L:S:s:d:g:")) != -1) {
+	while ((opt = getopt(argc, argv, "hvo:t:T:l:L:S:s:d:g:E:e:")) != -1) {
 		switch (opt) {
 			case 'o':
 				str_vec_push(&config.output_names, optarg);
@@ -962,6 +969,12 @@ int main(int argc, char *argv[]) {
 				printf("wlsunset version %s\n", WLSUNSET_VERSION);
 				ret = EXIT_SUCCESS;
 				goto end;
+			case 'E':
+				config.elevation_daylight = strtod(optarg, NULL);
+				break;
+			case 'e':
+				config.elevation_twilight = strtod(optarg, NULL);
+				break;
 			case 'h':
 				ret = EXIT_SUCCESS;
 			default:
@@ -993,6 +1006,18 @@ int main(int argc, char *argv[]) {
 			goto end;
 		}
 		config.longitude = RADIANS(config.longitude);
+		if (config.elevation_twilight > 90.0 || config.elevation_twilight < -90.0) {
+			fprintf(stderr, "twilight elevation (%lf) must be in interval [-90,90]\n",
+					config.elevation_twilight);
+			goto end;
+		}
+		config.elevation_twilight = RADIANS(90.833 - config.elevation_twilight);
+		if (config.elevation_daylight > 90.0 || config.elevation_daylight < -90.0) {
+			fprintf(stderr, "daylight elevation (%lf) must be in interval [-90,90]\n",
+					config.elevation_daylight);
+			goto end;
+		}
+		config.elevation_daylight = RADIANS(90.833 - config.elevation_daylight);
 	}
 	ret = wlrun(config);
 end:

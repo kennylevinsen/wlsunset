@@ -26,6 +26,14 @@ wlr-gamma-control-unstable-v1
 *-L* <long>
 	Set longitude (e.g. 116.3).
 
+*-E* <daylight>
+	Set solar elevation above the visible horizon that will be used for
+	transitions between daylight and twilight.
+
+*-e* <twilight>
+	Set solar elevation above the visible horizon that will be used for
+	transitions between twilight and night.
+
 *-S* <sunrise>
 	Manual time for sunrise as HH:MM (e.g. 06:30).
 
@@ -39,6 +47,31 @@ wlr-gamma-control-unstable-v1
 
 *-g* <gamma>
 	Set gamma (default: 1.0).
+
+# SOLAR TRACKING
+
+wlsunset uses the current day and specified location to calculate the time of
+day:
+
+1. The time where night transitions to twilight, as defined by the twilight
+solar elevation, marking the start of the low-to-high color temperature
+transition.
+2. The time where twilight transitions to daylight, as defined by the daylight
+solar elevation, marking the end of the low-to-high color temperature
+transition.
+3. The time where daylight transitions to twilight, as defined by the daylight
+solar elevation, marking the start of the high-to-low color temperature
+transition.
+4. The time where twilight transitions to night, as defined by the twilight
+solar elevation, marking the end of the high-to-low color temperature
+transition.
+
+The calculation uses a number of mathematical approximations and rely on a
+correctly set latitude, longitude and system clock.
+
+The point of transition can be controlled by changing the configured solar
+elevation thresholds with *-E* and *-e*. It is also possible to use a manually
+set time of transition using `*S*, *-s* and *-d*.
 
 # RUNTIME CONTROL
 

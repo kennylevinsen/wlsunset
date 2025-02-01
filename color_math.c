@@ -6,9 +6,6 @@
 #include <time.h>
 #include "color_math.h"
 
-static double SOLAR_START_TWILIGHT = RADIANS(90.833 + 6.0);
-static double SOLAR_END_TWILIGHT   = RADIANS(90.833 - 3.0);
-
 static int days_in_year(int year) {
 	int leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 	return leap ? 366 : 365;
@@ -56,13 +53,14 @@ static enum sun_condition condition(double latitude_rad, double sun_declination)
 	return sign_lat == sign_decl ? MIDNIGHT_SUN : POLAR_NIGHT;
 }
 
-enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun) {
+enum sun_condition calc_sun(struct tm *tm, double latitude,
+		double elevation_twilight, double elevation_daylight, struct sun *sun) {
 	double orbit_angle = date_orbit_angle(tm);
 	double decl = sun_declination(orbit_angle);
 	double eqtime = equation_of_time(orbit_angle);
 
-	double ha_twilight = sun_hour_angle(latitude, decl, SOLAR_START_TWILIGHT);
-	double ha_daylight = sun_hour_angle(latitude, decl, SOLAR_END_TWILIGHT);
+	double ha_twilight = sun_hour_angle(latitude, decl, elevation_twilight);
+	double ha_daylight = sun_hour_angle(latitude, decl, elevation_daylight);
 
 	sun->dawn = hour_angle_to_time(fabs(ha_twilight), eqtime);
 	sun->dusk = hour_angle_to_time(-fabs(ha_twilight), eqtime);

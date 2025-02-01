@@ -30,7 +30,8 @@ struct xyz {
   double x, y, z;
 };
 
-enum sun_condition calc_sun(struct tm *tm, double latitude, struct sun *sun);
+enum sun_condition calc_sun(struct tm *tm, double latitude,
+	double elevation_twilight, double elevation_daylight, struct sun *sun);
 struct rgb calc_whitepoint(int temp);
 
 #endif
