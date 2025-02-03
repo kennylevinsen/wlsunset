@@ -4,7 +4,7 @@
 #include <math.h>
 #include <errno.h>
 #include <time.h>
-#include "color_math.h"
+#include "color.h"
 
 static int days_in_year(int year) {
 	int leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;

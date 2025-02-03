@@ -17,7 +17,7 @@
 #include <wayland-client.h>
 
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
-#include "color_math.h"
+#include "color.h"
 #include "str_vec.h"
 
 #if defined(SPEEDRUN)
