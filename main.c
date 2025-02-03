@@ -276,8 +276,7 @@ done:
 	print_trajectory(ctx);
 }
 
-static int interpolate_temperature(time_t now, time_t start, time_t stop,
-		int temp_start, int temp_stop) {
+static double interpolate_position(time_t now, time_t start, time_t stop) {
 	if (start == stop) {
 		return stop;
 	}
@@ -287,61 +286,60 @@ static int interpolate_temperature(time_t now, time_t start, time_t stop,
 	} else if (time_pos < 0.0) {
 		time_pos = 0.0;
 	}
-	int temp_pos = (double)(temp_stop - temp_start) * time_pos;
-	return temp_start + temp_pos;
+	return time_pos;
 }
 
-static int get_temperature_normal(const struct context *ctx, time_t now) {
+static double get_position_normal(const struct context *ctx, time_t now) {
 	if (now < ctx->sun.dawn) {
-		return ctx->config.low_temp;
+		return 0.0;
 	} else if (now < ctx->sun.sunrise) {
-		return interpolate_temperature(now, ctx->sun.dawn,
-				ctx->sun.sunrise, ctx->config.low_temp,
-				ctx->config.high_temp);
+		return interpolate_position(now, ctx->sun.dawn, ctx->sun.sunrise);
 	} else if (now < ctx->sun.sunset) {
-		return ctx->config.high_temp;
+		return 1.0;
 	} else if (now < ctx->sun.night) {
-		return interpolate_temperature(now, ctx->sun.sunset,
-				ctx->sun.night, ctx->config.high_temp,
-				ctx->config.low_temp);
+		return interpolate_position(now, ctx->sun.night, ctx->sun.sunset);
 	} else {
-		return ctx->config.low_temp;
+		return 0.0;
 	}
 }
 
-static int get_temperature_transition(const struct context *ctx, time_t now) {
+static double get_position_transition(const struct context *ctx, time_t now) {
 	switch (ctx->condition) {
 	case MIDNIGHT_SUN:
 		if (now < ctx->sun.sunrise) {
-			return get_temperature_normal(ctx, now);
+			return get_position_normal(ctx, now);
 		}
-		return ctx->config.high_temp;
+		return 1.0;
 	default:
 		abort();
 	}
 }
 
-static int get_temperature(const struct context *ctx, time_t now) {
+static double get_position(const struct context *ctx, time_t now) {
 	switch (ctx->state) {
 	case STATE_NORMAL:
-		return get_temperature_normal(ctx, now);
+		return get_position_normal(ctx, now);
 	case STATE_TRANSITION:
-		return get_temperature_transition(ctx, now);
+		return get_position_transition(ctx, now);
 	case STATE_STATIC:
-		return ctx->condition == MIDNIGHT_SUN ? ctx->config.high_temp :
-			ctx->config.low_temp;
+		return ctx->condition == MIDNIGHT_SUN ? 1.0 : 0.0;
 	case STATE_FORCED:
 		switch (ctx->forced_state) {
 		case FORCE_HIGH:
-			return ctx->config.high_temp;
+			return 1.0;
 		case FORCE_LOW:
-			return ctx->config.low_temp;
+			return 0.0;
 		default:
 			abort();
 		}
 	default:
 		abort();
 	}
+}
+
+static int get_temp_from_pos(const struct context *ctx, double pos) {
+	int start = ctx->config.low_temp, stop = ctx->config.high_temp;
+	return start + (double)(stop - start) * pos;
 }
 
 static time_t get_deadline_normal(const struct context *ctx, time_t now) {
@@ -828,16 +826,17 @@ static int wlrun(struct config cfg) {
 	recalc_stops(&ctx, now);
 	update_timer(&ctx, ctx.timer, now);
 
-	int temp = get_temperature(&ctx, now);
-	set_temperature(&ctx.outputs, temp, ctx.config.gamma);
+	double pos = get_position(&ctx, now);
+	int temp = get_temp_from_pos(&ctx, pos);
+	set_temperature(&ctx.outputs, get_temp_from_pos(&ctx, pos), ctx.config.gamma);
 
-	int old_temp = temp;
+	double old_pos = pos;
 	while (display_dispatch(display, -1) != -1) {
 		if (ctx.new_output) {
 			ctx.new_output = false;
 
 			// Force set_temperature
-			old_temp = 0;
+			old_pos = -1.0;
 			timer_fired = true;
 		}
 
@@ -871,10 +870,13 @@ static int wlrun(struct config cfg) {
 			recalc_stops(&ctx, now);
 			update_timer(&ctx, ctx.timer, now);
 
-			if ((temp = get_temperature(&ctx, now)) != old_temp) {
-				old_temp = temp;
+			pos = get_position(&ctx, now);
+			if (pos != old_pos) {
+				old_pos = pos;
 				ctx.new_output = false;
-				set_temperature(&ctx.outputs, temp, ctx.config.gamma);
+
+				set_temperature(&ctx.outputs, get_temp_from_pos(&ctx, temp),
+						ctx.config.gamma);
 			}
 		}
 	}
