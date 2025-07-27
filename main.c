@@ -94,10 +94,16 @@ static int max(int a, int b) {
 	return a > b ? a : b;
 }
 
+struct gamma_t {
+	double r;
+	double g;
+	double b;
+};
+
 struct config {
 	int high_temp;
 	int low_temp;
-	double gamma;
+	struct gamma_t gamma;
 
 	double longitude;
 	double latitude;
@@ -621,19 +627,19 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 static void fill_gamma_table(uint16_t *table, uint32_t ramp_size, double rw,
-		double gw, double bw, double gamma) {
+     	double gw, double bw, struct gamma_t gamma) {
 	uint16_t *r = table;
 	uint16_t *g = table + ramp_size;
 	uint16_t *b = table + 2 * ramp_size;
 	for (uint32_t i = 0; i < ramp_size; ++i) {
 		double val = (double)i / (ramp_size - 1);
-		r[i] = (uint16_t)(UINT16_MAX * pow(val * rw, 1.0 / gamma));
-		g[i] = (uint16_t)(UINT16_MAX * pow(val * gw, 1.0 / gamma));
-		b[i] = (uint16_t)(UINT16_MAX * pow(val * bw, 1.0 / gamma));
+		r[i] = (uint16_t)(UINT16_MAX * pow(val * rw, 1.0 / gamma.r));
+		g[i] = (uint16_t)(UINT16_MAX * pow(val * gw, 1.0 / gamma.g));
+		b[i] = (uint16_t)(UINT16_MAX * pow(val * bw, 1.0 / gamma.b));
 	}
 }
 
-static void output_set_whitepoint(struct output *output, struct rgb *wp, double gamma) {
+static void output_set_whitepoint(struct output *output, struct rgb *wp, struct gamma_t gamma) {
 	if (!output->enabled || output->gamma_control == NULL || output->table_fd == -1) {
 		return;
 	}
@@ -643,7 +649,7 @@ static void output_set_whitepoint(struct output *output, struct rgb *wp, double 
 			output->table_fd);
 }
 
-static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
+static void set_temperature(struct wl_list *outputs, int temp, struct gamma_t gamma) {
 	struct rgb wp = calc_whitepoint(temp);
 	struct output *output;
 	fprintf(stderr, "setting temperature to %d K\n", temp);
@@ -909,6 +915,13 @@ static const char usage[] = "usage: %s [options]\n"
 "  -d <duration>  set manual duration in seconds (e.g. 1800)\n"
 "  -g <gamma>     set gamma (default: 1.0)\n";
 
+static bool has_comma(char* s) {
+	for (; *s != '\0'; ++s) {
+		if (*s == ',') return true;
+	}
+	return false;
+}
+
 int main(int argc, char *argv[]) {
 #ifdef SPEEDRUN
 	fprintf(stderr, "warning: speedrun mode enabled\n");
@@ -920,7 +933,7 @@ int main(int argc, char *argv[]) {
 		.longitude = NAN,
 		.high_temp = 6500,
 		.low_temp = 4000,
-		.gamma = 1.0,
+		.gamma = { 1.0, 1.0, 1.0 },
 		.elevation_daylight = 3.0,
 		.elevation_twilight = -6.0,
 	};
@@ -962,9 +975,20 @@ int main(int argc, char *argv[]) {
 			case 'd':
 				config.duration = strtol(optarg, NULL, 10);
 				break;
-			case 'g':
-				config.gamma = strtod(optarg, NULL);
+			case 'g': {
+				if (!has_comma(optarg)) {
+					double gamma = strtod(optarg, NULL);
+					config.gamma.r = gamma;
+					config.gamma.g = gamma;
+					config.gamma.b = gamma;
+				} else {
+					config.gamma.r = strtod(strtok(optarg, ","), NULL);
+					config.gamma.g = strtod(strtok(NULL, ","), NULL);
+					config.gamma.b = strtod(strtok(NULL, ","), NULL);
+				}
+				printf("gamma: %f, %f, %f\n", config.gamma.r, config.gamma.g, config.gamma.b);
 				break;
+			}
 			case 'v':
 				printf("wlsunset version %s\n", WLSUNSET_VERSION);
 				ret = EXIT_SUCCESS;
