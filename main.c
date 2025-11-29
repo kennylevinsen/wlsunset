@@ -514,7 +514,9 @@ static void wl_output_handle_mode(void *data, struct wl_output *output, uint32_t
 static void wl_output_handle_done(void *data, struct wl_output *wl_output) {
 	(void)wl_output;
 	struct output *output = data;
-	setup_gamma_control(output->context, output);
+	if (output->enabled) {
+		setup_gamma_control(output->context, output);
+	}
 }
 
 static void wl_output_handle_scale(void *data, struct wl_output *output, int scale) {
@@ -647,6 +649,9 @@ static void set_temperature(struct wl_list *outputs, int temp, double gamma) {
 	fprintf(stderr, "setting temperature to %d K\n", temp);
 
 	wl_list_for_each(output, outputs, link) {
+		if (!output->enabled) {
+			continue;
+		}
 		if (output->gamma_control == NULL) {
 			setup_gamma_control(output->context, output);
 			continue;
@@ -818,7 +823,9 @@ static int wlrun(struct config cfg) {
 
 	struct output *output;
 	wl_list_for_each(output, &ctx.outputs, link) {
-		setup_gamma_control(&ctx, output);
+		if (output->enabled) {
+			setup_gamma_control(&ctx, output);
+		}
 	}
 	wl_display_roundtrip(display);
 
