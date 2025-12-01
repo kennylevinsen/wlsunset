@@ -834,7 +834,6 @@ static int wlrun(struct config cfg) {
 	update_timer(&ctx, ctx.timer, now);
 
 	double pos = get_position(&ctx, now);
-	int temp = get_temp_from_pos(&ctx, pos);
 	set_temperature(&ctx.outputs, get_temp_from_pos(&ctx, pos), ctx.config.gamma);
 
 	double old_pos = pos;
@@ -882,7 +881,7 @@ static int wlrun(struct config cfg) {
 				old_pos = pos;
 				ctx.new_output = false;
 
-				set_temperature(&ctx.outputs, get_temp_from_pos(&ctx, temp),
+				set_temperature(&ctx.outputs, get_temp_from_pos(&ctx, pos),
 						ctx.config.gamma);
 			}
 		}
