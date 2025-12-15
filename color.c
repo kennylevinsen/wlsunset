@@ -150,15 +150,6 @@ static int planckian_locus(int temp, double *x, double *y) {
 	return 0;
 }
 
-static double srgb_gamma(double value, double gamma) {
-	// https://en.wikipedia.org/wiki/SRGB
-	if (value <= 0.0031308) {
-		return 12.92 * value;
-	} else {
-		return pow(1.055 * value, 1.0/gamma) - 0.055;
-	}
-}
-
 static double clamp(double value) {
 	if (value > 1.0) {
 		return 1.0;
@@ -169,16 +160,16 @@ static double clamp(double value) {
 	}
 }
 
-static struct rgb xyz_to_srgb(const struct xyz *xyz) {
+static struct rgb xyz_to_rgb(const struct xyz *xyz) {
 	// http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
 	return (struct rgb) {
-		.r = srgb_gamma(clamp(3.2404542 * xyz->x - 1.5371385 * xyz->y - 0.4985314 * xyz->z), 2.2),
-		.g = srgb_gamma(clamp(-0.9692660 * xyz->x + 1.8760108 * xyz->y + 0.0415560 * xyz->z), 2.2),
-		.b = srgb_gamma(clamp(0.0556434 * xyz->x - 0.2040259 * xyz->y + 1.0572252 * xyz->z), 2.2)
+		.r = pow(clamp(3.2404542 * xyz->x - 1.5371385 * xyz->y - 0.4985314 * xyz->z), 1.0 / 2.2),
+		.g = pow(clamp(-0.9692660 * xyz->x + 1.8760108 * xyz->y + 0.0415560 * xyz->z), 1.0 / 2.2),
+		.b = pow(clamp(0.0556434 * xyz->x - 0.2040259 * xyz->y + 1.0572252 * xyz->z), 1.0 / 2.2)
 	};
 }
 
-static void srgb_normalize(struct rgb *rgb) {
+static void rgb_normalize(struct rgb *rgb) {
 	double maxw = fmax(rgb->r, fmax(rgb->g, rgb->b));
 	rgb->r /= maxw;
 	rgb->g /= maxw;
@@ -219,8 +210,8 @@ struct rgb calc_whitepoint(int temp) {
 	}
 	wp.z = 1.0 - wp.x - wp.y;
 
-	struct rgb wp_rgb = xyz_to_srgb(&wp);
-	srgb_normalize(&wp_rgb);
+	struct rgb wp_rgb = xyz_to_rgb(&wp);
+	rgb_normalize(&wp_rgb);
 
 	return wp_rgb;
 }
