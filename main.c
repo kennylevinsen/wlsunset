@@ -991,6 +991,12 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	if (optind < argc) {
+		fprintf(stderr, "unexpected argument: %s\n", argv[optind]);
+		fprintf(stderr, usage, argv[0]);
+		goto end;
+	}
+
 	if (config.high_temp <= config.low_temp) {
 		fprintf(stderr, "high temp (%d) must be higher than low (%d) temp\n",
 				config.high_temp, config.low_temp);
