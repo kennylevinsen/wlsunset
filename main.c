@@ -164,8 +164,11 @@ struct output {
 	char *name;
 };
 
-static void print_trajectory(struct context *ctx) {
-	fprintf(stderr, "calculated sun trajectory: ");
+static void print_trajectory(struct context *ctx, time_t now) {
+	struct tm tm_now;
+	localtime_r(&now, &tm_now);
+	fprintf(stderr, "calculated sun trajectory at %02d:%02d: ",
+		tm_now.tm_hour, tm_now.tm_min);
 	struct tm dawn, sunrise, sunset, night;
 	switch (ctx->condition) {
 	case NORMAL:
@@ -273,7 +276,7 @@ done:
 	ctx->night_step_time = max(1, (ctx->sun.night - ctx->sun.sunset) *
 		anim_kelvin_step / temp_diff);
 
-	print_trajectory(ctx);
+	print_trajectory(ctx, now);
 }
 
 static double interpolate_position(time_t now, time_t start, time_t stop) {
